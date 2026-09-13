@@ -1,26 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-bg: #0a0a10;
+  --color-surface: #131320;
+  --color-surface-2: #1b1b2b;
+  --color-border: #2a2a40;
+  --color-purple: #a855f7;
+  --color-purple-light: #c084fc;
+  --color-purple-dark: #7e22ce;
+  --color-orange: #ff9900;
+  --color-text: #f5f5fa;
+  --color-text-muted: #9a9ab3;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-2: var(--color-surface-2);
+  --color-border: var(--color-border);
+  --color-purple: var(--color-purple);
+  --color-purple-light: var(--color-purple-light);
+  --color-purple-dark: var(--color-purple-dark);
+  --color-orange: var(--color-orange);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-bg);
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(168, 85, 247, 0.16), transparent 45%),
+    radial-gradient(circle at 100% 20%, rgba(168, 85, 247, 0.08), transparent 40%);
+  color: var(--color-text);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+::selection {
+  background: var(--color-purple);
+  color: #0a0a10;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-8px); }
+  40%, 60% { transform: translateX(8px); }
 }
