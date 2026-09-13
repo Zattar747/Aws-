@@ -46,10 +46,16 @@ export async function POST(req: NextRequest) {
   const isLast = nextIndex >= QUIZ_QUESTIONS.length;
 
   if (isLast) {
-    await db.execute({
-      sql: "UPDATE quiz_sessions SET score = ?, status = 'done', finished_at = ? WHERE id = ?",
-      args: [newScore, Date.now(), sessionId],
+    // Guard against a concurrent duplicate submission for this same
+    // question also reaching "done" and awarding points twice.
+    const updateResult = await db.execute({
+      sql: `UPDATE quiz_sessions SET score = ?, status = 'done', finished_at = ?
+            WHERE id = ? AND status = 'in_progress' AND current_question = ?`,
+      args: [newScore, Date.now(), sessionId, questionIndex],
     });
+    if (updateResult.rowsAffected === 0) {
+      return NextResponse.json({ error: "This question is no longer active." }, { status: 400 });
+    }
 
     const finalPointsAwarded = Math.max(newScore, 5); // participation floor, like the other games
     await awardPoints(session.player_key, "quiz", finalPointsAwarded, `final score ${newScore}`);
@@ -65,10 +71,14 @@ export async function POST(req: NextRequest) {
   }
 
   const now = Date.now();
-  await db.execute({
-    sql: "UPDATE quiz_sessions SET score = ?, current_question = ?, question_started_at = ? WHERE id = ?",
-    args: [newScore, nextIndex, now, sessionId],
+  const updateResult = await db.execute({
+    sql: `UPDATE quiz_sessions SET score = ?, current_question = ?, question_started_at = ?
+          WHERE id = ? AND status = 'in_progress' AND current_question = ?`,
+    args: [newScore, nextIndex, now, sessionId, questionIndex],
   });
+  if (updateResult.rowsAffected === 0) {
+    return NextResponse.json({ error: "This question is no longer active." }, { status: 400 });
+  }
 
   const nextQ = getQuestionForDisplay(nextIndex, optionOrders);
 

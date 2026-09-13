@@ -75,11 +75,13 @@ export async function POST(req: NextRequest) {
   const status = allMatched ? "done" : "in_progress";
   const finishedAt = allMatched ? Date.now() : null;
 
-  await db.execute({
+  // Guard against a concurrent duplicate submission for this same pending
+  // flip also reaching "done" and awarding points twice.
+  const updateResult = await db.execute({
     sql: `UPDATE memory_games
           SET matched_json = ?, pending_index = NULL, current_player = ?,
               moves_count = ?, scores_json = ?, status = ?, finished_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND status = 'in_progress' AND pending_index = ?`,
     args: [
       JSON.stringify(matched),
       nextPlayer,
@@ -88,8 +90,12 @@ export async function POST(req: NextRequest) {
       status,
       finishedAt,
       gameId,
+      firstIndex,
     ],
   });
+  if (updateResult.rowsAffected === 0) {
+    return NextResponse.json({ error: "This flip is no longer active." }, { status: 400 });
+  }
 
   let pointsAwarded: Record<string, number> | undefined;
   let winner: 1 | 2 | "tie" | undefined;

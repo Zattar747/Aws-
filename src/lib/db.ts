@@ -138,12 +138,22 @@ async function ensureSchema(): Promise<void> {
   await client.executeMultiple(SCHEMA);
 }
 
-const schemaReady = global.__awsArcadeSchemaReady ?? ensureSchema();
-if (process.env.NODE_ENV !== "production") {
-  global.__awsArcadeSchemaReady = schemaReady;
-}
+let schemaReady: Promise<void> | undefined = global.__awsArcadeSchemaReady;
 
 export async function getDb(): Promise<Client> {
+  if (!schemaReady) {
+    // If this fails (e.g. a transient network error on a cold start), clear
+    // it so the *next* call retries instead of every future request on this
+    // warm instance re-throwing the same cached rejection forever.
+    schemaReady = ensureSchema().catch((err) => {
+      schemaReady = undefined;
+      if (process.env.NODE_ENV !== "production") global.__awsArcadeSchemaReady = undefined;
+      throw err;
+    });
+    if (process.env.NODE_ENV !== "production") {
+      global.__awsArcadeSchemaReady = schemaReady;
+    }
+  }
   await schemaReady;
   return client;
 }

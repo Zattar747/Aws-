@@ -40,12 +40,17 @@ export async function POST(req: NextRequest) {
   const correct = chosenIndex === item.lieIndex;
   const finishedAt = Date.now();
 
-  await db.execute({
+  // Guard against a concurrent duplicate submission for this round also
+  // reaching "done" and awarding points twice.
+  const updateResult = await db.execute({
     sql: `UPDATE two_truths_rounds
           SET chosen_index = ?, correct = ?, status = 'done', finished_at = ?
-          WHERE id = ?`,
+          WHERE id = ? AND status = 'in_progress'`,
     args: [chosenIndex, correct ? 1 : 0, finishedAt, roundId],
   });
+  if (updateResult.rowsAffected === 0) {
+    return NextResponse.json({ error: "This round has already ended." }, { status: 400 });
+  }
 
   const pointsAwarded = twoTruthsPoints(correct);
   const totalPoints = await awardPoints(

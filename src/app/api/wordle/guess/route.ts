@@ -54,10 +54,18 @@ export async function POST(req: NextRequest) {
   const status: GameRow["status"] = won ? "won" : outOfGuesses ? "lost" : "in_progress";
   const finishedAt = status !== "in_progress" ? Date.now() : null;
 
-  await db.execute({
-    sql: `UPDATE wordle_games SET guesses_json = ?, status = ?, finished_at = ? WHERE id = ?`,
+  // Guard against a concurrent duplicate submission for this same game
+  // (double-click, retried request) also reaching "finished" and awarding
+  // points twice: only apply this write if the game was still in_progress
+  // the instant before, same as when we read it above.
+  const updateResult = await db.execute({
+    sql: `UPDATE wordle_games SET guesses_json = ?, status = ?, finished_at = ?
+          WHERE id = ? AND status = 'in_progress'`,
     args: [JSON.stringify(guesses), status, finishedAt, gameId],
   });
+  if (updateResult.rowsAffected === 0) {
+    return NextResponse.json({ error: "This game has already ended." }, { status: 400 });
+  }
 
   let pointsAwarded: number | undefined;
   let totalPoints: number | undefined;
