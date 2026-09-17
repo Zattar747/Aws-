@@ -29,12 +29,6 @@ export default function SiteHeader() {
           >
             Games
           </Link>
-          <Link
-            href="/leaderboard"
-            className="rounded-md px-3 py-2 text-text-muted transition hover:bg-surface hover:text-text"
-          >
-            Leaderboard
-          </Link>
         </nav>
       </div>
     </header>

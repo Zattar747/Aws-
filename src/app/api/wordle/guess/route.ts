@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { ALLOWED_GUESSES } from "@/lib/words";
 import { scoreGuess } from "@/lib/wordle-logic";
-import { awardPoints } from "@/lib/players";
-import { wordlePoints } from "@/lib/points";
 
 export const runtime = "nodejs";
 
@@ -12,12 +10,9 @@ const WORD_LENGTH = 5;
 
 interface GameRow {
   id: string;
-  player_key: string;
   word: string;
   guesses_json: string;
   status: "in_progress" | "won" | "lost";
-  started_at: number;
-  finished_at: number | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -52,31 +47,15 @@ export async function POST(req: NextRequest) {
   const won = rawGuess === game.word;
   const outOfGuesses = guesses.length >= MAX_GUESSES;
   const status: GameRow["status"] = won ? "won" : outOfGuesses ? "lost" : "in_progress";
-  const finishedAt = status !== "in_progress" ? Date.now() : null;
 
   // Guard against a concurrent duplicate submission for this same game
-  // (double-click, retried request) also reaching "finished" and awarding
-  // points twice: only apply this write if the game was still in_progress
-  // the instant before, same as when we read it above.
+  // (double-click, retried request) corrupting the guess history.
   const updateResult = await db.execute({
-    sql: `UPDATE wordle_games SET guesses_json = ?, status = ?, finished_at = ?
-          WHERE id = ? AND status = 'in_progress'`,
-    args: [JSON.stringify(guesses), status, finishedAt, gameId],
+    sql: `UPDATE wordle_games SET guesses_json = ?, status = ? WHERE id = ? AND status = 'in_progress'`,
+    args: [JSON.stringify(guesses), status, gameId],
   });
   if (updateResult.rowsAffected === 0) {
     return NextResponse.json({ error: "This game has already ended." }, { status: 400 });
-  }
-
-  let pointsAwarded: number | undefined;
-  let totalPoints: number | undefined;
-  if (status !== "in_progress") {
-    pointsAwarded = wordlePoints(won, guesses.length);
-    totalPoints = await awardPoints(
-      game.player_key,
-      "wordle",
-      pointsAwarded,
-      `${status} in ${guesses.length}`
-    );
   }
 
   return NextResponse.json({
@@ -85,8 +64,5 @@ export async function POST(req: NextRequest) {
     guessesUsed: guesses.length,
     maxGuesses: MAX_GUESSES,
     answer: status !== "in_progress" ? game.word : undefined,
-    timeMs: finishedAt ? finishedAt - game.started_at : undefined,
-    pointsAwarded,
-    totalPoints,
   });
 }

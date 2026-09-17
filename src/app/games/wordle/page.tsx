@@ -1,10 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import type { LetterState } from "@/lib/wordle-logic";
-import { getLastPlayerName, setLastPlayerName } from "@/lib/client-name";
-import PlayerBadge from "@/components/PlayerBadge";
 
 const WORD_LENGTH = 5;
 const MAX_GUESSES = 6;
@@ -14,14 +11,12 @@ const KEY_ROWS = [
   ["enter", "z", "x", "c", "v", "b", "n", "m", "back"],
 ];
 
-type Phase = "name" | "playing" | "ended";
+type Phase = "loading" | "playing" | "ended";
 
 interface EndInfo {
   status: "won" | "lost";
   answer: string;
   guessesUsed: number;
-  timeMs: number;
-  pointsAwarded: number;
 }
 
 const tileClasses: Record<LetterState | "empty" | "typing", string> = {
@@ -39,18 +34,8 @@ const keyClasses: Record<LetterState | "unknown", string> = {
   absent: "bg-[#232333] text-text-muted",
 };
 
-function formatTime(ms: number) {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-}
-
 export default function WordlePage() {
-  const [phase, setPhase] = useState<Phase>("name");
-  const [nameInput, setNameInput] = useState(() =>
-    typeof window !== "undefined" ? getLastPlayerName() : ""
-  );
+  const [phase, setPhase] = useState<Phase>("loading");
   const [gameId, setGameId] = useState<string | null>(null);
   const [guesses, setGuesses] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<LetterState[][]>([]);
@@ -59,8 +44,6 @@ export default function WordlePage() {
   const [shakeRow, setShakeRow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [endInfo, setEndInfo] = useState<EndInfo | null>(null);
-  const [displayName, setDisplayName] = useState("");
-  const [totalPoints, setTotalPoints] = useState(0);
 
   const keyStates = useMemo(() => {
     const states: Record<string, LetterState> = {};
@@ -82,19 +65,11 @@ export default function WordlePage() {
     window.setTimeout(() => setMessage((m) => (m === text ? null : m)), 2000);
   }, []);
 
-  async function startGame() {
-    const trimmed = nameInput.trim();
-    if (!trimmed) {
-      flashMessage("Enter a name first.");
-      return;
-    }
+  const startGame = useCallback(async () => {
     setLoading(true);
+    setPhase("loading");
     try {
-      const res = await fetch("/api/wordle/new", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerName: trimmed }),
-      });
+      const res = await fetch("/api/wordle/new", { method: "POST" });
       const data = await res.json();
       if (!res.ok) {
         flashMessage(data.error ?? "Could not start game.");
@@ -105,14 +80,18 @@ export default function WordlePage() {
       setFeedback([]);
       setCurrentGuess("");
       setEndInfo(null);
-      setDisplayName(data.player.displayName);
-      setTotalPoints(data.player.totalPoints);
-      setLastPlayerName(trimmed);
       setPhase("playing");
     } finally {
       setLoading(false);
     }
-  }
+  }, [flashMessage]);
+
+  useEffect(() => {
+    // Deferred to a microtask: startGame() sets state synchronously as its
+    // first statement (before any await), which would otherwise run inside
+    // this effect's own synchronous execution.
+    queueMicrotask(() => void startGame());
+  }, [startGame]);
 
   const submitGuess = useCallback(async () => {
     if (currentGuess.length !== WORD_LENGTH || !gameId || loading) {
@@ -145,10 +124,7 @@ export default function WordlePage() {
           status: data.status,
           answer: data.answer,
           guessesUsed: data.guessesUsed,
-          timeMs: data.timeMs,
-          pointsAwarded: data.pointsAwarded,
         });
-        setTotalPoints(data.totalPoints);
         setPhase("ended");
       }
     } finally {
@@ -192,46 +168,17 @@ export default function WordlePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center px-4 py-8">
-      <div className="mb-6 flex w-full items-center justify-between">
-        <div>
-          <h1 className="font-mono text-2xl font-bold tracking-tight">AWS WORDLE</h1>
-          <p className="text-xs text-text-muted">Guess the 5-letter word in 6 tries.</p>
-        </div>
-        <Link
-          href="/games/wordle/leaderboard"
-          className="rounded-md border border-border px-3 py-1.5 font-mono text-xs text-text-muted transition hover:border-purple hover:text-purple"
-        >
-          Leaderboard
-        </Link>
+      <div className="mb-6 w-full">
+        <h1 className="font-mono text-2xl font-bold tracking-tight">AWS WORDLE</h1>
+        <p className="text-xs text-text-muted">Guess the 5-letter word in 6 tries.</p>
       </div>
 
-      {phase === "name" && (
-        <div className="flex w-full flex-col items-center gap-4 rounded-xl border border-border bg-surface p-6">
-          <p className="text-center text-sm text-text-muted">
-            Enter your name to appear on the leaderboard, then start guessing.
-          </p>
-          <input
-            autoFocus
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && startGame()}
-            maxLength={30}
-            placeholder="Your name"
-            className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-center font-mono text-text outline-none focus:border-purple"
-          />
-          <button
-            onClick={startGame}
-            disabled={loading}
-            className="w-full rounded-md bg-purple px-4 py-2 font-mono font-semibold text-white transition hover:bg-purple-dark disabled:opacity-50"
-          >
-            {loading ? "Starting..." : "Start Game"}
-          </button>
-        </div>
+      {phase === "loading" && !endInfo && (
+        <p className="text-sm text-text-muted">Loading...</p>
       )}
 
-      {phase !== "name" && (
+      {phase !== "loading" && (
         <>
-          <PlayerBadge displayName={displayName} totalPoints={totalPoints} />
           <div className="mb-6 flex flex-col gap-1.5">
             {rows.map((row, ri) => (
               <div
@@ -255,7 +202,7 @@ export default function WordlePage() {
             ))}
           </div>
 
-          <div className="mb-4 h-6 text-sm font-medium text-orange">{message ?? " "}</div>
+          <div className="mb-4 h-6 text-sm font-medium text-orange">{message ?? " "}</div>
 
           {phase === "playing" && (
             <div className="flex w-full flex-col gap-1.5">
@@ -293,26 +240,16 @@ export default function WordlePage() {
               </p>
               {endInfo.status === "won" && (
                 <p className="text-sm text-text-muted">
-                  Solved in {endInfo.guessesUsed} guess{endInfo.guessesUsed === 1 ? "" : "es"} &middot;{" "}
-                  {formatTime(endInfo.timeMs)}
+                  Solved in {endInfo.guessesUsed} guess{endInfo.guessesUsed === 1 ? "" : "es"}
                 </p>
               )}
-              <p className="font-mono text-sm text-orange">+{endInfo.pointsAwarded} points</p>
-              <div className="mt-2 flex w-full gap-2">
-                <button
-                  onClick={startGame}
-                  disabled={loading}
-                  className="flex-1 rounded-md bg-purple px-4 py-2 font-mono font-semibold text-white transition hover:bg-purple-dark disabled:opacity-50"
-                >
-                  Play Again
-                </button>
-                <Link
-                  href="/games/wordle/leaderboard"
-                  className="flex-1 rounded-md border border-border px-4 py-2 text-center font-mono font-semibold text-text transition hover:border-purple hover:text-purple"
-                >
-                  Leaderboard
-                </Link>
-              </div>
+              <button
+                onClick={startGame}
+                disabled={loading}
+                className="mt-2 w-full rounded-md bg-purple px-4 py-2 font-mono font-semibold text-white transition hover:bg-purple-dark disabled:opacity-50"
+              >
+                Play Again
+              </button>
             </div>
           )}
         </>

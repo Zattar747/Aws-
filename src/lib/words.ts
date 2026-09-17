@@ -2,26 +2,42 @@ import englishWords from "an-array-of-english-words";
 import { getNextIndex } from "./rotation";
 
 /**
- * PLACEHOLDER word list — swap this out once the club sends the real list.
- * Rotation logic below only depends on `ANSWERS` being a flat array of
- * unique, lowercase, 5-letter strings, so replacing this array is enough.
+ * AWS Club Wordle word list — 145 tech/AWS-themed 5-letter words, from
+ * wordlist_n_trivia/aws_club_wordle_words.pdf.
  */
 export const ANSWERS: string[] = [
-  "cloud", "stack", "query", "array", "index", "logic", "input", "route",
-  "build", "debug", "cache", "async", "class", "chain", "block", "graph",
-  "layer", "batch", "queue", "token", "shard", "proxy", "agent", "audit",
-  "brace", "crane", "drift", "eager", "flare", "grasp", "hatch", "ideal",
-  "jolly", "knack", "latch", "mirth", "noble", "orbit", "pixel", "quilt",
-  "rally", "spark", "trace", "unity", "vivid", "wharf", "amber", "blaze",
-  "crisp", "dwell", "frost", "glint", "hover", "irate", "jumbo", "karma",
-  "lemon", "mango", "nudge", "olive", "pearl", "quirk", "raven", "solar",
-  "tulip", "unzip", "vapor", "witty", "xenon", "yield", "zesty", "brisk",
-  "charm", "delta", "elite", "focal", "grove", "haste", "joust", "kiosk",
-  "lunar", "medal", "nifty", "opera", "plaid", "quest", "rider", "swift",
-  "tidal", "usher", "valve", "windy",
+  "cloud", "email", "mouse", "phone", "video",
+  "audio", "typed", "files", "pixel", "table",
+  "stack", "queue", "array", "input", "model",
+  "cache", "image", "sheet", "watch", "robot",
+  "logic", "debug", "admin", "token", "login",
+  "users", "layer", "nodes", "setup", "build",
+  "patch", "alert", "shell", "agent", "codes",
+  "proxy", "agile", "cyber", "media", "hosts",
+  "ports", "certs", "group", "roles", "fleet",
+  "alarm", "batch", "shard", "zones", "vault",
+  "scale", "route", "event", "index", "state",
+  "speed", "power", "level", "local", "smart",
+  "board", "chart", "graph", "field", "timer",
+  "clock", "reset", "drive", "flash", "links",
+  "share", "store", "touch", "swipe", "click",
+  "icons", "panel", "frame", "theme", "style",
+  "virus", "hacks", "print", "scans", "bytes",
+  "demos", "linux", "feeds", "blogs", "emoji",
+  "texts", "chats", "tweet", "wired", "modem",
+  "buggy", "error", "crash", "fixed", "digit",
+  "coder", "modes", "saved", "loads", "paste",
+  "drags", "drops", "trees", "loops", "class",
+  "macro", "regex", "split", "merge", "fetch",
+  "trace", "async", "await", "const", "float",
+  "query", "quota", "limit", "usage", "rules",
+  "trust", "claim", "clone", "stage", "mount",
+  "probe", "audit", "grant", "relay", "train",
+  "infer", "drone", "laser", "cable", "phish",
+  "spoof", "worms", "swift", "react", "redux",
 ];
 
-// De-dupe defensively in case the placeholder list above gets edited by hand.
+// De-dupe defensively in case the list above gets edited by hand.
 const UNIQUE_ANSWERS = Array.from(new Set(ANSWERS)).filter((w) => w.length === 5);
 
 /**
@@ -34,7 +50,7 @@ export const ALLOWED_GUESSES: Set<string> = new Set(
 );
 
 // Guarantee every possible answer is guessable even if the dictionary
-// package doesn't happen to contain one of the curated placeholder words.
+// package doesn't happen to contain one of the curated words.
 for (const word of UNIQUE_ANSWERS) ALLOWED_GUESSES.add(word);
 
 /**

@@ -30,9 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": [
-    "node_modules",
-    "src/app/games/quiz/_legacy-kahoot/**",
-    "src/app/api/quiz/_legacy-kahoot/**"
-  ]
+  "exclude": ["node_modules"]
 }
