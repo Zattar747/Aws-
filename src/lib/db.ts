@@ -6,8 +6,7 @@ declare global {
 }
 
 const SCHEMA = `
-  -- generic "don't repeat until exhausted" cursor, shared by any game with
-  -- a content pool (wordle answers, trivia questions per level, ...)
+  -- generic "don't repeat until exhausted" cursor for wordle's answer list
   CREATE TABLE IF NOT EXISTS item_cycles (
     cycle_key TEXT PRIMARY KEY,
     cycle_number INTEGER NOT NULL,
