@@ -11,6 +11,11 @@ const KEY_ROWS = [
   ["enter", "z", "x", "c", "v", "b", "n", "m", "back"],
 ];
 
+// Stagger the per-tile flip so tiles reveal left-to-right, like NYT Wordle.
+const FLIP_STAGGER_MS = 150;
+const FLIP_DURATION_MS = 400;
+const TOTAL_REVEAL_MS = (WORD_LENGTH - 1) * FLIP_STAGGER_MS + FLIP_DURATION_MS;
+
 type Phase = "loading" | "playing" | "ended";
 
 interface EndInfo {
@@ -43,11 +48,16 @@ export default function WordlePage() {
   const [message, setMessage] = useState<string | null>(null);
   const [shakeRow, setShakeRow] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [revealingRow, setRevealingRow] = useState<number | null>(null);
   const [endInfo, setEndInfo] = useState<EndInfo | null>(null);
 
+  // While a row is mid-flip, its letters shouldn't count toward the
+  // on-screen keyboard's colors yet — they land the instant the row
+  // finishes revealing, same as real Wordle.
   const keyStates = useMemo(() => {
     const states: Record<string, LetterState> = {};
-    guesses.forEach((guess, gi) => {
+    const visibleRows = revealingRow ?? guesses.length;
+    guesses.slice(0, visibleRows).forEach((guess, gi) => {
       guess.split("").forEach((letter, li) => {
         const state = feedback[gi]?.[li];
         if (!state) return;
@@ -58,7 +68,7 @@ export default function WordlePage() {
       });
     });
     return states;
-  }, [guesses, feedback]);
+  }, [guesses, feedback, revealingRow]);
 
   const flashMessage = useCallback((text: string) => {
     setMessage(text);
@@ -79,6 +89,7 @@ export default function WordlePage() {
       setGuesses([]);
       setFeedback([]);
       setCurrentGuess("");
+      setRevealingRow(null);
       setEndInfo(null);
       setPhase("playing");
     } finally {
@@ -114,29 +125,39 @@ export default function WordlePage() {
         setShakeRow(true);
         window.setTimeout(() => setShakeRow(false), 400);
         flashMessage(data.error ?? "Invalid guess.");
+        setLoading(false);
         return;
       }
+      const newRowIndex = guesses.length;
       setGuesses((g) => [...g, currentGuess]);
       setFeedback((f) => [...f, data.result]);
       setCurrentGuess("");
-      if (data.status !== "in_progress") {
-        setEndInfo({
-          status: data.status,
-          answer: data.answer,
-          guessesUsed: data.guessesUsed,
-        });
-        setPhase("ended");
-      }
-    } finally {
+      setRevealingRow(newRowIndex);
+      // Keep input locked and the win/lose screen hidden until the tiles
+      // have actually finished flipping, instead of popping in instantly.
+      window.setTimeout(() => {
+        setRevealingRow(null);
+        setLoading(false);
+        if (data.status !== "in_progress") {
+          setEndInfo({
+            status: data.status,
+            answer: data.answer,
+            guessesUsed: data.guessesUsed,
+          });
+          setPhase("ended");
+        }
+      }, TOTAL_REVEAL_MS);
+    } catch {
+      flashMessage("Network error. Try again.");
       setLoading(false);
     }
-  }, [currentGuess, gameId, loading, flashMessage]);
+  }, [currentGuess, gameId, loading, flashMessage, guesses.length]);
 
   useEffect(() => {
     if (phase !== "playing") return;
 
     function onKeyDown(e: KeyboardEvent) {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || loading) return;
       if (e.key === "Enter") {
         submitGuess();
       } else if (e.key === "Backspace") {
@@ -148,9 +169,10 @@ export default function WordlePage() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [phase, submitGuess]);
+  }, [phase, loading, submitGuess]);
 
   function onVirtualKey(key: string) {
+    if (loading) return;
     if (key === "enter") {
       submitGuess();
     } else if (key === "back") {
@@ -179,7 +201,7 @@ export default function WordlePage() {
 
       {phase !== "loading" && (
         <>
-          <div className="mb-6 flex flex-col gap-1.5">
+          <div className="mb-6 flex flex-col gap-1.5" style={{ perspective: "800px" }}>
             {rows.map((row, ri) => (
               <div
                 key={ri}
@@ -189,10 +211,14 @@ export default function WordlePage() {
                   const letter = row.letters[ci];
                   const state = row.states?.[ci];
                   const variant = state ?? (letter ? "typing" : "empty");
+                  const isFlipping = ri === revealingRow && state;
                   return (
                     <div
                       key={ci}
-                      className={`flex h-12 w-12 items-center justify-center rounded-md border-2 font-mono text-xl font-bold uppercase transition-colors ${tileClasses[variant]}`}
+                      className={`flex h-12 w-12 items-center justify-center rounded-md border-2 font-mono text-xl font-bold uppercase ${
+                        isFlipping ? `tile-flip-${state}` : `transition-colors ${tileClasses[variant]}`
+                      }`}
+                      style={isFlipping ? { animationDelay: `${ci * FLIP_STAGGER_MS}ms` } : undefined}
                     >
                       {letter ?? ""}
                     </div>

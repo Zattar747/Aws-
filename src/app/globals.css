@@ -57,3 +57,30 @@ body {
   30%, 50%, 70% { transform: translateX(-8px); }
   40%, 60% { transform: translateX(8px); }
 }
+
+/* Wordle-style tile reveal: the tile rotates edge-on (invisible at 90deg),
+   and the color swap happens right at that invisible instant so it reads
+   as the tile "flipping over" to its revealed color, not just changing
+   color. Three variants since each end color is different. */
+@keyframes flip-reveal-correct {
+  0%, 49% { transform: rotateX(0deg); background-color: var(--color-surface); border-color: var(--color-text-muted); color: var(--color-text); }
+  50% { transform: rotateX(90deg); }
+  51%, 100% { transform: rotateX(0deg); background-color: var(--color-purple); border-color: var(--color-purple); color: white; }
+}
+@keyframes flip-reveal-present {
+  0%, 49% { transform: rotateX(0deg); background-color: var(--color-surface); border-color: var(--color-text-muted); color: var(--color-text); }
+  50% { transform: rotateX(90deg); }
+  51%, 100% { transform: rotateX(0deg); background-color: var(--color-orange); border-color: var(--color-orange); color: #1a1200; }
+}
+@keyframes flip-reveal-absent {
+  0%, 49% { transform: rotateX(0deg); background-color: var(--color-surface); border-color: var(--color-text-muted); color: var(--color-text); }
+  50% { transform: rotateX(90deg); }
+  51%, 100% { transform: rotateX(0deg); background-color: var(--color-surface-2); border-color: var(--color-border); color: var(--color-text-muted); }
+}
+
+/* fill-mode "both" (not just "forwards"): during each tile's staggered
+   animation-delay, this holds the 0% keyframe (the "typing" look) instead
+   of rendering unstyled/transparent while it waits its turn to flip. */
+.tile-flip-correct { animation: flip-reveal-correct 400ms ease-in-out both; }
+.tile-flip-present { animation: flip-reveal-present 400ms ease-in-out both; }
+.tile-flip-absent { animation: flip-reveal-absent 400ms ease-in-out both; }
