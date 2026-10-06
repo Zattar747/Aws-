@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 const STORAGE_KEY = "awsArcade:adminToken";
 
 interface PlayerRow {
+  nameKey: string;
   displayName: string;
   totalPoints: number;
   createdAt: number;
@@ -90,6 +91,20 @@ export default function AdminPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ game, locked }),
+      });
+      await loadData();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function togglePlayerLock(playerKey: string, game: string, locked: boolean) {
+    setBusy(true);
+    try {
+      await authedFetch("/api/admin/games/player-lock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerKey, game, locked }),
       });
       await loadData();
     } finally {
@@ -236,14 +251,28 @@ export default function AdminPage() {
             </thead>
             <tbody>
               {players?.map((p) => (
-                <tr key={p.displayName} className="border-b border-border last:border-0">
+                <tr key={p.nameKey} className="border-b border-border last:border-0">
                   <td className="px-3 py-2">{p.displayName}</td>
                   <td className="px-3 py-2 text-right text-purple-light">{p.totalPoints}</td>
                   {GAMES.map((g) => {
                     const g2 = p.games[g];
+                    const isBlocked = g2?.status === "blocked";
                     return (
                       <td key={g} className="px-3 py-2 text-right text-text-muted">
-                        {g2 ? `${g2.pointsEarned} (${g2.status})` : "n/a"}
+                        <div className="flex items-center justify-end gap-2">
+                          <span>{g2 ? `${g2.pointsEarned} (${g2.status})` : "n/a"}</span>
+                          <button
+                            disabled={busy}
+                            onClick={() => togglePlayerLock(p.nameKey, g, !isBlocked)}
+                            className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase transition disabled:opacity-50 ${
+                              isBlocked
+                                ? "border-orange text-orange hover:bg-orange/10"
+                                : "border-border text-text-muted hover:border-purple"
+                            }`}
+                          >
+                            {isBlocked ? "Unlock" : "Lock"}
+                          </button>
+                        </div>
                       </td>
                     );
                   })}

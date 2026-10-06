@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       players: players.map((p) => ({
+        nameKey: p.name_key,
         displayName: p.display_name,
         totalPoints: p.total_points,
         createdAt: p.created_at,

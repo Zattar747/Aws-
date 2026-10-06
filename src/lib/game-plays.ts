@@ -3,7 +3,7 @@ import { getDb } from "./db";
 import { AuthError } from "./players";
 
 export type GameName = "wordle" | "trivia" | "connections" | "pictionary";
-export type PlayStatus = "not_started" | "in_progress" | "completed";
+export type PlayStatus = "not_started" | "in_progress" | "completed" | "blocked";
 
 interface GamePlayRow {
   player_key: string;
@@ -55,6 +55,9 @@ export async function assertCanStartGame(
   const play = (results[1].rows[0] as unknown as GamePlayRow | undefined) ?? null;
   if (play?.status === "completed") {
     throw new AuthError("You've already played this game. Each game can only be played once.", 403);
+  }
+  if (play?.status === "blocked") {
+    throw new AuthError("An admin has locked this game for you specifically.", 423);
   }
 
   return { play, extraResults: results.slice(2) };
@@ -121,4 +124,54 @@ export async function finalizePictionaryForPlayer(playerKey: string): Promise<vo
   const play = await getGamePlay(playerKey, "pictionary");
   if (!play || play.status === "completed") return;
   await completeGamePlay(playerKey, "pictionary", play.points_earned);
+}
+
+/**
+ * Admin override for one specific player's access to one game, separate
+ * from the global per-game lock. Locking sets status to 'blocked', which
+ * assertCanStartGame rejects just like a global lock. Unlocking clears
+ * that block — and if the player had already completed the game, also
+ * reverses the points it awarded them so they get a clean replay instead
+ * of keeping points from a run that's being wiped.
+ */
+export async function adminSetPlayerGameLock(
+  playerKey: string,
+  game: GameName,
+  locked: boolean
+): Promise<void> {
+  const db = await getDb();
+
+  if (locked) {
+    await db.execute({
+      sql: `INSERT INTO game_plays (player_key, game, status, points_earned)
+            VALUES (?, ?, 'blocked', 0)
+            ON CONFLICT(player_key, game) DO UPDATE SET status = 'blocked'`,
+      args: [playerKey, game],
+    });
+    return;
+  }
+
+  const play = await getGamePlay(playerKey, game);
+  if (play?.status === "completed" && play.points_earned > 0) {
+    await db.batch([
+      {
+        sql: "UPDATE players SET total_points = total_points - ?, points_updated_at = ? WHERE name_key = ?",
+        args: [play.points_earned, Date.now(), playerKey],
+      },
+      {
+        sql: `UPDATE game_plays SET status = 'not_started', points_earned = 0, completed_at = NULL
+              WHERE player_key = ? AND game = ?`,
+        args: [playerKey, game],
+      },
+    ]);
+    return;
+  }
+
+  await db.execute({
+    sql: `INSERT INTO game_plays (player_key, game, status, points_earned)
+          VALUES (?, ?, 'not_started', 0)
+          ON CONFLICT(player_key, game) DO UPDATE SET status = 'not_started'
+          WHERE game_plays.status = 'blocked'`,
+    args: [playerKey, game],
+  });
 }
