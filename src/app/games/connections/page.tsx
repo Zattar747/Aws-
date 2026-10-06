@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { fetchJsonWithRetry } from "@/lib/fetch-retry";
-import { areAdjacent, GRID_COLS, TOTAL_CATEGORIES } from "@/lib/connections-logic";
+import { GROUP_SIZE, GRID_COLS, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import LoginGate from "@/components/LoginGate";
 
 type Phase = "loading" | "blocked" | "playing" | "done";
@@ -30,8 +30,7 @@ interface ConnectResponse {
   error?: string;
   correct: boolean;
   expired?: boolean;
-  alreadySolved?: boolean;
-  category?: string;
+  awayCount?: number;
   positions?: number[];
   pointsEarned?: number;
   totalScore: number;
@@ -56,18 +55,19 @@ export default function ConnectionsPage() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [words, setWords] = useState<string[]>([]);
   const [solvedPositions, setSolvedPositions] = useState<Set<number>>(new Set());
-  const [selectedPos, setSelectedPos] = useState<number | null>(null);
-  const [wrongFlashPair, setWrongFlashPair] = useState<[number, number] | null>(null);
+  const [selected, setSelected] = useState<number[]>([]);
+  const [wrongFlash, setWrongFlash] = useState<number[]>([]);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const [score, setScore] = useState(0);
   const [solvedCount, setSolvedCount] = useState(0);
   const [liveRemainingMs, setLiveRemainingMs] = useState(0);
   const [durationMs, setDurationMs] = useState(90000);
   const [finalGrid, setFinalGrid] = useState<GridCell[] | null>(null);
   const [finalScore, setFinalScore] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
   const startedAtRef = useRef(0);
   const finishingRef = useRef(false);
-  const connectingRef = useRef(false);
 
   const finishGame = useCallback(
     async (preloadedGrid?: GridCell[], preloadedTotalPoints?: number, preloadedScore?: number) => {
@@ -92,9 +92,6 @@ export default function ConnectionsPage() {
         setPhase("done");
         refreshPlayer();
       } catch {
-        // If this fails, the timer effect will simply not have moved us to
-        // "done" — the player can reload and /new will pick up the expired
-        // session and finalize it there instead.
         finishingRef.current = false;
       }
     },
@@ -142,54 +139,60 @@ export default function ConnectionsPage() {
     return () => window.clearInterval(id);
   }, [phase, durationMs, finishGame]);
 
-  async function handleCellClick(pos: number) {
-    if (phase !== "playing" || solvedPositions.has(pos) || connectingRef.current) return;
+  function toggleCell(pos: number) {
+    if (phase !== "playing" || solvedPositions.has(pos) || submitting) return;
+    setSelected((prev) => {
+      if (prev.includes(pos)) return prev.filter((p) => p !== pos);
+      if (prev.length >= GROUP_SIZE) return prev;
+      return [...prev, pos];
+    });
+  }
 
-    if (selectedPos === null) {
-      setSelectedPos(pos);
-      return;
-    }
-    if (selectedPos === pos) {
-      setSelectedPos(null);
-      return;
-    }
-    if (!areAdjacent(selectedPos, pos)) {
-      setSelectedPos(pos);
-      return;
-    }
-
-    const a = selectedPos;
-    const b = pos;
-    setSelectedPos(null);
-    connectingRef.current = true;
+  async function submitGroup() {
+    if (selected.length !== GROUP_SIZE || submitting || !sessionId || !token) return;
+    setSubmitting(true);
+    setFeedback(null);
     try {
       const res = await fetch("/api/connections/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ sessionId, posA: a, posB: b }),
+        body: JSON.stringify({ sessionId, positions: selected }),
       });
       const data: ConnectResponse = await res.json();
-      if (!res.ok) return;
+      if (!res.ok) {
+        setSubmitting(false);
+        return;
+      }
 
       if (data.expired) {
         finishGame();
         return;
       }
+
       if (data.correct && data.positions) {
         setSolvedPositions((prev) => new Set([...prev, ...data.positions!]));
         setScore(data.totalScore);
         setSolvedCount(data.solvedCount);
+        setSelected([]);
+        setFeedback(null);
+        setSubmitting(false);
         if (data.allSolved) {
           finishGame(data.grid, data.totalPoints, data.totalScore);
         }
       } else {
-        setWrongFlashPair([a, b]);
-        window.setTimeout(() => setWrongFlashPair(null), 450);
+        setWrongFlash(selected);
+        setFeedback(
+          data.awayCount ? `${data.awayCount} away from a group!` : "Not a match."
+        );
+        window.setTimeout(() => {
+          setWrongFlash([]);
+          setSelected([]);
+          setFeedback(null);
+          setSubmitting(false);
+        }, 1100);
       }
     } catch {
-      // transient failure on a single click — just let the player try again
-    } finally {
-      connectingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -201,7 +204,7 @@ export default function ConnectionsPage() {
       <div className="mb-6 w-full">
         <h1 className="font-mono text-2xl font-bold tracking-tight">CONNECTIONS</h1>
         <p className="text-xs text-text-muted">
-          Link related words that sit next to each other &mdash; across, up-down, or diagonal.
+          Pick 4 words that belong to the same group, then submit.
         </p>
       </div>
 
@@ -235,13 +238,13 @@ export default function ConnectionsPage() {
           </div>
 
           <div
-            className="grid w-full gap-1.5"
+            className="mb-4 grid w-full gap-1.5"
             style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))` }}
           >
             {words.map((word, pos) => {
               const isSolved = solvedPositions.has(pos);
-              const isSelected = selectedPos === pos;
-              const isWrong = wrongFlashPair?.includes(pos) ?? false;
+              const isSelected = selected.includes(pos);
+              const isWrong = wrongFlash.includes(pos);
               let variant = "border-border bg-surface hover:border-purple";
               if (isSolved) variant = "border-purple bg-purple/10 text-purple-light";
               else if (isWrong) variant = "border-orange bg-orange/10";
@@ -249,8 +252,8 @@ export default function ConnectionsPage() {
               return (
                 <button
                   key={pos}
-                  onClick={() => handleCellClick(pos)}
-                  disabled={isSolved}
+                  onClick={() => toggleCell(pos)}
+                  disabled={isSolved || submitting}
                   className={`flex min-h-14 items-center justify-center rounded-md border-2 px-1 py-2 text-center text-[10px] leading-tight transition-colors sm:text-xs ${variant}`}
                 >
                   {word}
@@ -258,12 +261,37 @@ export default function ConnectionsPage() {
               );
             })}
           </div>
+
+          <div className="flex w-full items-center justify-between gap-3">
+            <p className="font-mono text-xs text-text-muted">
+              {feedback ?? `${selected.length} / ${GROUP_SIZE} selected`}
+            </p>
+            <div className="flex gap-2">
+              {selected.length > 0 && !submitting && (
+                <button
+                  onClick={() => setSelected([])}
+                  className="rounded-md border border-border px-3 py-2 font-mono text-xs text-text-muted transition hover:border-purple"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                onClick={submitGroup}
+                disabled={selected.length !== GROUP_SIZE || submitting}
+                className="rounded-md bg-purple px-4 py-2 font-mono text-xs font-semibold text-white transition hover:bg-purple-dark disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Submit
+              </button>
+            </div>
+          </div>
         </>
       )}
 
       {phase === "done" && (
         <div className="flex w-full flex-col items-center gap-4 rounded-xl border border-border bg-surface p-6 text-center">
-          <p className="font-mono text-lg font-bold">Time&apos;s up!</p>
+          <p className="font-mono text-lg font-bold">
+            {solvedCount === TOTAL_CATEGORIES ? "All groups found!" : "Time's up!"}
+          </p>
           <p className="font-mono text-sm text-orange">{finalScore} points earned</p>
           {finalGrid && (
             <div className="w-full text-left">

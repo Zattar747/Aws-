@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { areAdjacent, isValidPosition, TOTAL_CATEGORIES } from "@/lib/connections-logic";
+import { GROUP_SIZE, isValidPosition, maxCategoryOverlap, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import { CONNECTIONS_POINTS_PER_CATEGORY } from "@/lib/points";
 import { finalizeSession, isExpired, loadSession, parseGrid } from "@/lib/connections-session";
 
@@ -12,8 +12,7 @@ export async function POST(req: NextRequest) {
     const player = await getPlayerFromToken(bearerToken(req));
     const body = await req.json().catch(() => null);
     const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
-    const posA = body?.posA;
-    const posB = body?.posB;
+    const positions: unknown = body?.positions;
 
     const session = await loadSession(sessionId, player.nameKey);
     if (!session) {
@@ -33,35 +32,37 @@ export async function POST(req: NextRequest) {
         totalPoints,
       });
     }
-    if (!isValidPosition(posA) || !isValidPosition(posB) || !areAdjacent(posA, posB)) {
-      return NextResponse.json({ error: "Those two words aren't next to each other." }, { status: 400 });
+
+    if (
+      !Array.isArray(positions) ||
+      positions.length !== GROUP_SIZE ||
+      !positions.every(isValidPosition) ||
+      new Set(positions).size !== GROUP_SIZE
+    ) {
+      return NextResponse.json({ error: "Pick exactly 4 different words." }, { status: 400 });
     }
 
     const grid = parseGrid(session.grid_json);
     const solved: string[] = JSON.parse(session.solved_json);
-    const catA = grid[posA].category;
-    const catB = grid[posB].category;
+    const categories = positions.map((p) => grid[p].category);
 
-    if (solved.includes(catA) || solved.includes(catB)) {
+    if (categories.some((c) => solved.includes(c))) {
+      return NextResponse.json({ error: "One of those words is already part of a solved group." }, { status: 400 });
+    }
+
+    const { category, count } = maxCategoryOverlap(categories);
+
+    if (count !== GROUP_SIZE) {
       return NextResponse.json({
         correct: false,
-        alreadySolved: true,
+        awayCount: count >= 2 ? GROUP_SIZE - count : undefined,
         totalScore: session.score,
         solvedCount: solved.length,
         totalCategories: TOTAL_CATEGORIES,
       });
     }
 
-    if (catA !== catB) {
-      return NextResponse.json({
-        correct: false,
-        totalScore: session.score,
-        solvedCount: solved.length,
-        totalCategories: TOTAL_CATEGORIES,
-      });
-    }
-
-    const newSolved = [...solved, catA];
+    const newSolved = [...solved, category];
     const newScore = session.score + CONNECTIONS_POINTS_PER_CATEGORY;
     const allSolved = newSolved.length === TOTAL_CATEGORIES;
 
@@ -80,14 +81,9 @@ export async function POST(req: NextRequest) {
       totalPoints = await finalizeSession(player.nameKey, { ...session, score: newScore });
     }
 
-    const positions = grid.reduce<number[]>((acc, cell, i) => {
-      if (cell.category === catA) acc.push(i);
-      return acc;
-    }, []);
-
     return NextResponse.json({
       correct: true,
-      category: catA,
+      category,
       positions,
       pointsEarned: CONNECTIONS_POINTS_PER_CATEGORY,
       totalScore: newScore,
