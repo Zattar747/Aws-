@@ -1,4 +1,4 @@
-import { createClient, type Client } from "@libsql/client";
+import { createClient, LibsqlError, type Client } from "@libsql/client";
 
 declare global {
   var __awsArcadeDbClient: Client | undefined;
@@ -131,8 +131,15 @@ const TRANSIENT_ERROR_CODES = new Set([
   "EPIPE",
 ]);
 
-function isTransientNetworkError(err: unknown): boolean {
+function isTransientError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
+  // SQLite (and so libSQL/Turso) has a single-writer model: under a burst
+  // of concurrent serverless instances all writing at once — notably many
+  // cold instances all running the schema-setup DDL simultaneously — some
+  // writes get rejected as "the database is busy" rather than queued.
+  // That's exactly the kind of transient condition worth retrying, same as
+  // a dropped socket.
+  if (err instanceof LibsqlError && /BUSY|LOCKED/i.test(err.code)) return true;
   const code = (err as NodeJS.ErrnoException).code;
   if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
   const cause = (err as { cause?: unknown }).cause;
@@ -144,23 +151,27 @@ function isTransientNetworkError(err: unknown): boolean {
 }
 
 /**
- * Wraps execute() with a couple of retries for transient network blips
- * (a dropped socket to Turso, a connect timeout) — these happen for real
- * under concurrent load and shouldn't surface as a 500 to the player.
- * Safe to retry because every write in this app is already structured as
- * an idempotent, guarded statement (INSERT ... ON CONFLICT, or an UPDATE
+ * Wraps execute()/batch()/executeMultiple() with a few retries for
+ * transient failures (a dropped socket to Turso, a connect timeout, a
+ * SQLITE_BUSY from write contention) — these happen for real under
+ * concurrent load and shouldn't surface as a 500 to the player. Safe to
+ * retry because every write in this app is already structured as an
+ * idempotent, guarded statement (INSERT ... ON CONFLICT, or an UPDATE
  * gated on the row still being in its expected prior state), specifically
  * so a duplicate attempt is a harmless no-op rather than a double effect.
  */
 function withRetry<T extends (...args: never[]) => Promise<unknown>>(fn: T): T {
   return (async (...args: Parameters<T>) => {
-    const maxAttempts = 3;
+    const maxAttempts = 5;
     for (let attempt = 1; ; attempt++) {
       try {
         return await fn(...args);
       } catch (err) {
-        if (attempt >= maxAttempts || !isTransientNetworkError(err)) throw err;
-        await new Promise((r) => setTimeout(r, 75 * attempt));
+        if (attempt >= maxAttempts || !isTransientError(err)) throw err;
+        // Jittered backoff so a burst of contending instances don't all
+        // retry in lockstep and collide again.
+        const jitter = Math.random() * 60;
+        await new Promise((r) => setTimeout(r, 60 * attempt + jitter));
       }
     }
   }) as T;
@@ -169,7 +180,7 @@ function withRetry<T extends (...args: never[]) => Promise<unknown>>(fn: T): T {
 function wrapClientWithRetry(target: Client): Client {
   return new Proxy(target, {
     get(obj, prop, receiver) {
-      if (prop === "execute" || prop === "batch") {
+      if (prop === "execute" || prop === "batch" || prop === "executeMultiple") {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return withRetry((obj[prop] as any).bind(obj));
       }
