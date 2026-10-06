@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getNextWord } from "@/lib/words";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { assertCanStartGame, markGameInProgress } from "@/lib/game-plays";
+import { assertCanStartGame } from "@/lib/game-plays";
 import { scoreGuess } from "@/lib/wordle-logic";
 
 export const runtime = "nodejs";
@@ -21,17 +21,18 @@ interface ExistingGameRow {
 export async function POST(req: NextRequest) {
   try {
     const player = await getPlayerFromToken(bearerToken(req));
-    await assertCanStartGame(player.nameKey, "wordle");
 
-    const db = await getDb();
+    // Folds the "do I already have an in-progress attempt?" read into the
+    // same round trip as the lock/already-played checks, instead of a
+    // separate one — every round trip here is a real network hop to Turso.
+    const { extraResults } = await assertCanStartGame(player.nameKey, "wordle", [
+      {
+        sql: "SELECT id, word, guesses_json, status FROM wordle_games WHERE player_key = ? AND status = 'in_progress'",
+        args: [player.nameKey],
+      },
+    ]);
+    const existingRow = extraResults[0].rows[0] as unknown as ExistingGameRow | undefined;
 
-    // Resume an existing in-progress attempt (e.g. page refresh) instead of
-    // handing out a second word — one play per player, no re-rolls.
-    const existing = await db.execute({
-      sql: "SELECT id, word, guesses_json, status FROM wordle_games WHERE player_key = ? AND status = 'in_progress'",
-      args: [player.nameKey],
-    });
-    const existingRow = existing.rows[0] as unknown as ExistingGameRow | undefined;
     if (existingRow) {
       const guesses: string[] = JSON.parse(existingRow.guesses_json);
       return NextResponse.json({
@@ -46,11 +47,20 @@ export async function POST(req: NextRequest) {
     const id = randomUUID();
     const word = await getNextWord();
 
-    await db.execute({
-      sql: `INSERT INTO wordle_games (id, player_key, word, guesses_json, status) VALUES (?, ?, ?, '[]', 'in_progress')`,
-      args: [id, player.nameKey, word],
-    });
-    await markGameInProgress(player.nameKey, "wordle");
+    const db = await getDb();
+    await db.batch([
+      {
+        sql: `INSERT INTO wordle_games (id, player_key, word, guesses_json, status) VALUES (?, ?, ?, '[]', 'in_progress')`,
+        args: [id, player.nameKey, word],
+      },
+      {
+        sql: `INSERT INTO game_plays (player_key, game, status, points_earned)
+              VALUES (?, 'wordle', 'in_progress', 0)
+              ON CONFLICT(player_key, game) DO UPDATE SET status = 'in_progress'
+              WHERE game_plays.status != 'completed'`,
+        args: [player.nameKey],
+      },
+    ]);
 
     return NextResponse.json({
       gameId: id,

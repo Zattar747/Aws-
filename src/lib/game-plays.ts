@@ -1,3 +1,4 @@
+import type { InStatement, ResultSet } from "@libsql/client";
 import { getDb } from "./db";
 import { AuthError } from "./players";
 
@@ -26,34 +27,37 @@ export async function getGamePlay(playerKey: string, game: GameName): Promise<Ga
  * locked by the admin, or if this player has already completed it — a
  * completed game can never be replayed, by design (no re-rolling for a
  * better score).
+ *
+ * `extraStatements` lets a caller fold its own read (e.g. "do I already have
+ * an in-progress wordle_games row?") into this same network round trip
+ * instead of paying for a separate one — every round trip here crosses a
+ * real continent (Vercel's compute region vs. Turso's), so collapsing
+ * several sequential reads into one batch is a meaningful latency win, not
+ * just tidiness.
  */
-export async function assertCanStartGame(playerKey: string, game: GameName): Promise<GamePlayRow | null> {
+export async function assertCanStartGame(
+  playerKey: string,
+  game: GameName,
+  extraStatements: InStatement[] = []
+): Promise<{ play: GamePlayRow | null; extraResults: ResultSet[] }> {
   const db = await getDb();
-  const lockResult = await db.execute({
-    sql: "SELECT locked FROM game_locks WHERE game = ?",
-    args: [game],
-  });
-  const locked = (lockResult.rows[0] as unknown as { locked: number } | undefined)?.locked;
-  if (locked === 1) {
+  const results = await db.batch([
+    { sql: "SELECT locked FROM game_locks WHERE game = ?", args: [game] },
+    { sql: "SELECT * FROM game_plays WHERE player_key = ? AND game = ?", args: [playerKey, game] },
+    ...extraStatements,
+  ]);
+
+  const locked = (results[0].rows[0] as unknown as { locked: number } | undefined)?.locked === 1;
+  if (locked) {
     throw new AuthError("This game isn't open yet. Wait for the admin to unlock it.", 423);
   }
 
-  const play = await getGamePlay(playerKey, game);
+  const play = (results[1].rows[0] as unknown as GamePlayRow | undefined) ?? null;
   if (play?.status === "completed") {
     throw new AuthError("You've already played this game. Each game can only be played once.", 403);
   }
-  return play;
-}
 
-export async function markGameInProgress(playerKey: string, game: GameName): Promise<void> {
-  const db = await getDb();
-  await db.execute({
-    sql: `INSERT INTO game_plays (player_key, game, status, points_earned)
-          VALUES (?, ?, 'in_progress', 0)
-          ON CONFLICT(player_key, game) DO UPDATE SET status = 'in_progress'
-          WHERE game_plays.status != 'completed'`,
-    args: [playerKey, game],
-  });
+  return { play, extraResults: results.slice(2) };
 }
 
 /**
@@ -85,16 +89,14 @@ export async function completeGamePlay(
     return existing?.points_earned ?? 0;
   }
 
-  await db.execute({
-    sql: `UPDATE players SET total_points = total_points + ?, points_updated_at = ? WHERE name_key = ?`,
-    args: [pointsEarned, now, playerKey],
-  });
-
-  const totalResult = await db.execute({
-    sql: "SELECT total_points FROM players WHERE name_key = ?",
-    args: [playerKey],
-  });
-  return (totalResult.rows[0] as unknown as { total_points: number }).total_points;
+  const results = await db.batch([
+    {
+      sql: "UPDATE players SET total_points = total_points + ?, points_updated_at = ? WHERE name_key = ?",
+      args: [pointsEarned, now, playerKey],
+    },
+    { sql: "SELECT total_points FROM players WHERE name_key = ?", args: [playerKey] },
+  ]);
+  return (results[1].rows[0] as unknown as { total_points: number }).total_points;
 }
 
 /**

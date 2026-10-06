@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { LibsqlError } from "@libsql/client";
 import { getDb } from "./db";
 import { hashPassword, verifyPassword } from "./password";
 
@@ -32,14 +33,8 @@ function toRecord(row: PlayerRow): PlayerRecord {
   return { nameKey: row.name_key, displayName: row.display_name, totalPoints: row.total_points };
 }
 
-async function createSession(playerKey: string): Promise<string> {
-  const db = await getDb();
-  const token = randomUUID();
-  await db.execute({
-    sql: "INSERT INTO player_sessions (token, player_key, created_at) VALUES (?, ?, ?)",
-    args: [token, playerKey, Date.now()],
-  });
-  return token;
+function isConstraintViolation(err: unknown): boolean {
+  return err instanceof LibsqlError && err.code.includes("CONSTRAINT");
 }
 
 export async function registerPlayer(
@@ -55,24 +50,35 @@ export async function registerPlayer(
     throw new AuthError("Password must be at least 4 characters.", 400);
   }
 
-  const db = await getDb();
-  const existing = await db.execute({
-    sql: "SELECT name_key FROM players WHERE name_key = ?",
-    args: [nameKey],
-  });
-  if (existing.rows.length > 0) {
-    throw new AuthError("That name is already taken. Choose a different one.", 409);
-  }
-
   const passwordHash = await hashPassword(password);
   const now = Date.now();
-  await db.execute({
-    sql: `INSERT INTO players (name_key, display_name, password_hash, total_points, points_updated_at, created_at)
-          VALUES (?, ?, ?, 0, ?, ?)`,
-    args: [nameKey, displayName, passwordHash, now, now],
-  });
+  const token = randomUUID();
+  const db = await getDb();
 
-  const token = await createSession(nameKey);
+  try {
+    // One round trip, and racing registrations for the same name can't both
+    // win: the PRIMARY KEY constraint on name_key is what actually decides
+    // it, not a separate (and racy) "does this name exist" read beforehand.
+    // If the player insert fails, the whole batch rolls back — no orphaned
+    // session left behind for a registration that didn't happen.
+    await db.batch([
+      {
+        sql: `INSERT INTO players (name_key, display_name, password_hash, total_points, points_updated_at, created_at)
+              VALUES (?, ?, ?, 0, ?, ?)`,
+        args: [nameKey, displayName, passwordHash, now, now],
+      },
+      {
+        sql: "INSERT INTO player_sessions (token, player_key, created_at) VALUES (?, ?, ?)",
+        args: [token, nameKey, now],
+      },
+    ]);
+  } catch (err) {
+    if (isConstraintViolation(err)) {
+      throw new AuthError("That name is already taken. Choose a different one.", 409);
+    }
+    throw err;
+  }
+
   return { player: { nameKey, displayName, totalPoints: 0 }, token };
 }
 
@@ -94,7 +100,11 @@ export async function loginPlayer(
   if (!ok) {
     throw new AuthError("Wrong password.", 401);
   }
-  const token = await createSession(nameKey);
+  const token = randomUUID();
+  await db.execute({
+    sql: "INSERT INTO player_sessions (token, player_key, created_at) VALUES (?, ?, ?)",
+    args: [token, nameKey, Date.now()],
+  });
   return { player: toRecord(row), token };
 }
 

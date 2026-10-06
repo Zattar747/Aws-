@@ -152,22 +152,26 @@ function isTransientNetworkError(err: unknown): boolean {
  * gated on the row still being in its expected prior state), specifically
  * so a duplicate attempt is a harmless no-op rather than a double effect.
  */
+function withRetry<T extends (...args: never[]) => Promise<unknown>>(fn: T): T {
+  return (async (...args: Parameters<T>) => {
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await fn(...args);
+      } catch (err) {
+        if (attempt >= maxAttempts || !isTransientNetworkError(err)) throw err;
+        await new Promise((r) => setTimeout(r, 75 * attempt));
+      }
+    }
+  }) as T;
+}
+
 function wrapClientWithRetry(target: Client): Client {
   return new Proxy(target, {
     get(obj, prop, receiver) {
-      if (prop === "execute") {
-        return async (...args: Parameters<Client["execute"]>) => {
-          const maxAttempts = 3;
-          for (let attempt = 1; ; attempt++) {
-            try {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              return await (obj.execute as any)(...args);
-            } catch (err) {
-              if (attempt >= maxAttempts || !isTransientNetworkError(err)) throw err;
-              await new Promise((r) => setTimeout(r, 75 * attempt));
-            }
-          }
-        };
+      if (prop === "execute" || prop === "batch") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return withRetry((obj[prop] as any).bind(obj));
       }
       const value = Reflect.get(obj, prop, receiver);
       return typeof value === "function" ? value.bind(obj) : value;
