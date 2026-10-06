@@ -112,6 +112,23 @@ export default function AdminPage() {
     }
   }
 
+  async function deletePlayer(playerKey: string, displayName: string) {
+    if (!window.confirm(`Delete ${displayName}? This removes their account and all game data permanently.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await authedFetch("/api/admin/players/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerKey }),
+      });
+      await loadData();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startRound() {
     setBusy(true);
     setPictionaryMsg(null);
@@ -247,6 +264,7 @@ export default function AdminPage() {
                     {g}
                   </th>
                 ))}
+                <th className="px-3 py-2 text-right">&nbsp;</th>
               </tr>
             </thead>
             <tbody>
@@ -276,11 +294,20 @@ export default function AdminPage() {
                       </td>
                     );
                   })}
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      disabled={busy}
+                      onClick={() => deletePlayer(p.nameKey, p.displayName)}
+                      className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase text-text-muted transition hover:border-orange hover:text-orange disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
               {players?.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-text-muted">
+                  <td colSpan={7} className="px-3 py-6 text-center text-text-muted">
                     No players registered yet.
                   </td>
                 </tr>

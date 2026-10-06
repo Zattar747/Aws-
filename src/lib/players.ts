@@ -128,6 +128,27 @@ export async function getPlayerFromToken(token: string | null): Promise<PlayerRe
   return toRecord(row);
 }
 
+/**
+ * Removes a player and every row of their own personal game data. Doesn't
+ * touch pictionary_rounds even for rounds they drew — that round's strokes
+ * and other players' guesses/points are shared data, not this player's
+ * alone, so deleting them would corrupt other players' history. Freeing
+ * the name_key also means someone else can register that name afterward.
+ */
+export async function deletePlayer(nameKey: string): Promise<void> {
+  const db = await getDb();
+  await db.batch([
+    { sql: "DELETE FROM player_sessions WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM game_plays WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM wordle_games WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM trivia_sessions WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM connections_sessions WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM pictionary_round_players WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM pictionary_drawers_used WHERE player_key = ?", args: [nameKey] },
+    { sql: "DELETE FROM players WHERE name_key = ?", args: [nameKey] },
+  ]);
+}
+
 export function bearerToken(req: Request): string | null {
   const header = req.headers.get("authorization");
   if (!header?.startsWith("Bearer ")) return null;
