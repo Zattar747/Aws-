@@ -27,6 +27,8 @@ export function triviaQuestionPoints(
   return correct ? TRIVIA_POINTS_BY_DIFFICULTY[difficulty] : 0;
 }
 
+export const CONNECTIONS_POINTS_PER_CATEGORY = 20;
+
 export const PICTIONARY_FULL_POINTS = 100;
 export const PICTIONARY_HALF_POINTS = 50;
 

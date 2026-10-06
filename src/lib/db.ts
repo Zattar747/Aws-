@@ -81,6 +81,19 @@ const SCHEMA = `
     status TEXT NOT NULL DEFAULT 'in_progress'
   );
 
+  -- connections: one shuffled-grid session per player, played once. solved
+  -- categories accumulate as they're found; grid_json keeps the server-side
+  -- answer key (word -> category) that the client never receives directly.
+  CREATE TABLE IF NOT EXISTS connections_sessions (
+    id TEXT PRIMARY KEY,
+    player_key TEXT NOT NULL,
+    grid_json TEXT NOT NULL,
+    solved_json TEXT NOT NULL DEFAULT '[]',
+    score INTEGER NOT NULL DEFAULT 0,
+    started_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+  );
+
   -- pictionary: one shared admin-run session, made of rounds
   CREATE TABLE IF NOT EXISTS pictionary_session (
     id INTEGER PRIMARY KEY CHECK (id = 1),
