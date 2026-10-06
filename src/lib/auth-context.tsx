@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { fetchJsonWithRetry } from "./fetch-retry";
 
 const STORAGE_KEY = "awsArcade:session";
 
@@ -68,13 +69,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const submit = useCallback(async (endpoint: string, name: string, password: string) => {
     setError(null);
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, password }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
+      const { ok, data } = await fetchJsonWithRetry<{ error?: string; token: string; player: Player }>(
+        endpoint,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, password }),
+        }
+      );
+      if (!ok) {
         setError(data.error ?? "Something went wrong.");
         return false;
       }

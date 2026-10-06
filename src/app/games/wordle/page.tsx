@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { LetterState } from "@/lib/wordle-logic";
 import { useAuth } from "@/lib/auth-context";
+import { fetchJsonWithRetry } from "@/lib/fetch-retry";
 import LoginGate from "@/components/LoginGate";
 
 const WORD_LENGTH = 5;
@@ -83,12 +84,16 @@ export default function WordlePage() {
     setLoading(true);
     setPhase("loading");
     try {
-      const res = await fetch("/api/wordle/new", {
+      const { ok, data } = await fetchJsonWithRetry<{
+        error?: string;
+        gameId: string;
+        guesses?: string[];
+        results?: LetterState[][];
+      }>("/api/wordle/new", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (!ok) {
         setBlockedMessage(data.error ?? "Could not start game.");
         setPhase("blocked");
         return;
@@ -100,6 +105,9 @@ export default function WordlePage() {
       setRevealingRow(null);
       setEndInfo(null);
       setPhase("playing");
+    } catch {
+      setBlockedMessage("Network error. Please try again.");
+      setPhase("blocked");
     } finally {
       setLoading(false);
     }

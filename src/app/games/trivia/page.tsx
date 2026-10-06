@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
+import { fetchJsonWithRetry } from "@/lib/fetch-retry";
 import LoginGate from "@/components/LoginGate";
 
 type Phase = "loading" | "blocked" | "question" | "reveal" | "done";
@@ -46,24 +47,34 @@ export default function TriviaPage() {
   useEffect(() => {
     if (!token) return;
     (async () => {
-      const res = await fetch("/api/trivia/new", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setBlockedMessage(data.error ?? "Could not start quiz.");
+      try {
+        const { ok, data } = await fetchJsonWithRetry<{
+          error?: string;
+          sessionId: string;
+          totalQuestions: number;
+          durationMs: number;
+          question: QuestionData;
+        }>("/api/trivia/new", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!ok) {
+          setBlockedMessage(data.error ?? "Could not start quiz.");
+          setPhase("blocked");
+          return;
+        }
+        setSessionId(data.sessionId);
+        setTotalQuestions(data.totalQuestions);
+        setDurationMs(data.durationMs);
+        setQuestion(data.question);
+        submittedRef.current = false;
+        questionStartRef.current = Date.now();
+        setLiveRemainingMs(data.durationMs);
+        setPhase("question");
+      } catch {
+        setBlockedMessage("Network error. Please try again.");
         setPhase("blocked");
-        return;
       }
-      setSessionId(data.sessionId);
-      setTotalQuestions(data.totalQuestions);
-      setDurationMs(data.durationMs);
-      setQuestion(data.question);
-      submittedRef.current = false;
-      questionStartRef.current = Date.now();
-      setLiveRemainingMs(data.durationMs);
-      setPhase("question");
     })();
   }, [token]);
 
