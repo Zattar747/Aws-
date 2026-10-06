@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { LetterState } from "@/lib/wordle-logic";
+import { useAuth } from "@/lib/auth-context";
+import LoginGate from "@/components/LoginGate";
 
 const WORD_LENGTH = 5;
 const MAX_GUESSES = 6;
@@ -16,12 +19,13 @@ const FLIP_STAGGER_MS = 150;
 const FLIP_DURATION_MS = 400;
 const TOTAL_REVEAL_MS = (WORD_LENGTH - 1) * FLIP_STAGGER_MS + FLIP_DURATION_MS;
 
-type Phase = "loading" | "playing" | "ended";
+type Phase = "loading" | "playing" | "ended" | "blocked";
 
 interface EndInfo {
   status: "won" | "lost";
   answer: string;
   guessesUsed: number;
+  pointsAwarded: number;
 }
 
 const tileClasses: Record<LetterState | "empty" | "typing", string> = {
@@ -40,7 +44,9 @@ const keyClasses: Record<LetterState | "unknown", string> = {
 };
 
 export default function WordlePage() {
+  const { player, token, ready, refreshPlayer } = useAuth();
   const [phase, setPhase] = useState<Phase>("loading");
+  const [blockedMessage, setBlockedMessage] = useState<string | null>(null);
   const [gameId, setGameId] = useState<string | null>(null);
   const [guesses, setGuesses] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<LetterState[][]>([]);
@@ -51,9 +57,6 @@ export default function WordlePage() {
   const [revealingRow, setRevealingRow] = useState<number | null>(null);
   const [endInfo, setEndInfo] = useState<EndInfo | null>(null);
 
-  // While a row is mid-flip, its letters shouldn't count toward the
-  // on-screen keyboard's colors yet — they land the instant the row
-  // finishes revealing, same as real Wordle.
   const keyStates = useMemo(() => {
     const states: Record<string, LetterState> = {};
     const visibleRows = revealingRow ?? guesses.length;
@@ -76,18 +79,23 @@ export default function WordlePage() {
   }, []);
 
   const startGame = useCallback(async () => {
+    if (!token) return;
     setLoading(true);
     setPhase("loading");
     try {
-      const res = await fetch("/api/wordle/new", { method: "POST" });
+      const res = await fetch("/api/wordle/new", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const data = await res.json();
       if (!res.ok) {
-        flashMessage(data.error ?? "Could not start game.");
+        setBlockedMessage(data.error ?? "Could not start game.");
+        setPhase("blocked");
         return;
       }
       setGameId(data.gameId);
-      setGuesses([]);
-      setFeedback([]);
+      setGuesses(data.guesses ?? []);
+      setFeedback(data.results ?? []);
       setCurrentGuess("");
       setRevealingRow(null);
       setEndInfo(null);
@@ -95,17 +103,19 @@ export default function WordlePage() {
     } finally {
       setLoading(false);
     }
-  }, [flashMessage]);
+  }, [token]);
 
   useEffect(() => {
+    if (!token) return;
     // Deferred to a microtask: startGame() sets state synchronously as its
     // first statement (before any await), which would otherwise run inside
     // this effect's own synchronous execution.
     queueMicrotask(() => void startGame());
-  }, [startGame]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const submitGuess = useCallback(async () => {
-    if (currentGuess.length !== WORD_LENGTH || !gameId || loading) {
+    if (currentGuess.length !== WORD_LENGTH || !gameId || loading || !token) {
       if (currentGuess.length !== WORD_LENGTH) {
         setShakeRow(true);
         window.setTimeout(() => setShakeRow(false), 400);
@@ -117,7 +127,7 @@ export default function WordlePage() {
     try {
       const res = await fetch("/api/wordle/guess", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ gameId, guess: currentGuess }),
       });
       const data = await res.json();
@@ -143,15 +153,17 @@ export default function WordlePage() {
             status: data.status,
             answer: data.answer,
             guessesUsed: data.guessesUsed,
+            pointsAwarded: data.pointsAwarded,
           });
           setPhase("ended");
+          refreshPlayer();
         }
       }, TOTAL_REVEAL_MS);
     } catch {
       flashMessage("Network error. Try again.");
       setLoading(false);
     }
-  }, [currentGuess, gameId, loading, flashMessage, guesses.length]);
+  }, [currentGuess, gameId, loading, flashMessage, guesses.length, token, refreshPlayer]);
 
   useEffect(() => {
     if (phase !== "playing") return;
@@ -182,6 +194,9 @@ export default function WordlePage() {
     }
   }
 
+  if (!ready) return null;
+  if (!player) return <LoginGate />;
+
   const rows = Array.from({ length: MAX_GUESSES }, (_, i) => {
     if (i < guesses.length) return { letters: guesses[i].split(""), states: feedback[i] };
     if (i === guesses.length) return { letters: currentGuess.split(""), states: null };
@@ -192,14 +207,26 @@ export default function WordlePage() {
     <div className="mx-auto flex w-full max-w-md flex-1 flex-col items-center px-4 py-8">
       <div className="mb-6 w-full">
         <h1 className="font-mono text-2xl font-bold tracking-tight">AWS WORDLE</h1>
-        <p className="text-xs text-text-muted">Guess the 5-letter word in 6 tries.</p>
+        <p className="text-xs text-text-muted">
+          Guess the 5-letter word in 6 tries. One attempt &mdash; make it count.
+        </p>
       </div>
 
-      {phase === "loading" && !endInfo && (
-        <p className="text-sm text-text-muted">Loading...</p>
+      {phase === "loading" && <p className="text-sm text-text-muted">Loading...</p>}
+
+      {phase === "blocked" && (
+        <div className="flex w-full flex-col items-center gap-3 rounded-xl border border-border bg-surface p-6 text-center">
+          <p className="text-sm text-text-muted">{blockedMessage}</p>
+          <Link
+            href="/"
+            className="mt-2 w-full rounded-md bg-purple px-4 py-2 text-center font-mono font-semibold text-white transition hover:bg-purple-dark"
+          >
+            Back to games
+          </Link>
+        </div>
       )}
 
-      {phase !== "loading" && (
+      {(phase === "playing" || phase === "ended") && (
         <>
           <div className="mb-6 flex flex-col gap-1.5" style={{ perspective: "800px" }}>
             {rows.map((row, ri) => (
@@ -269,13 +296,13 @@ export default function WordlePage() {
                   Solved in {endInfo.guessesUsed} guess{endInfo.guessesUsed === 1 ? "" : "es"}
                 </p>
               )}
-              <button
-                onClick={startGame}
-                disabled={loading}
-                className="mt-2 w-full rounded-md bg-purple px-4 py-2 font-mono font-semibold text-white transition hover:bg-purple-dark disabled:opacity-50"
+              <p className="font-mono text-sm text-orange">+{endInfo.pointsAwarded} points</p>
+              <Link
+                href="/"
+                className="mt-2 w-full rounded-md bg-purple px-4 py-2 text-center font-mono font-semibold text-white transition hover:bg-purple-dark"
               >
-                Play Again
-              </button>
+                Back to games
+              </Link>
             </div>
           )}
         </>

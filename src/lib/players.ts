@@ -1,0 +1,125 @@
+import { randomUUID } from "crypto";
+import { getDb } from "./db";
+import { hashPassword, verifyPassword } from "./password";
+
+export function normalizeName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export interface PlayerRecord {
+  nameKey: string;
+  displayName: string;
+  totalPoints: number;
+}
+
+interface PlayerRow {
+  name_key: string;
+  display_name: string;
+  password_hash: string;
+  total_points: number;
+}
+
+export class AuthError extends Error {
+  constructor(
+    message: string,
+    public status: number
+  ) {
+    super(message);
+  }
+}
+
+function toRecord(row: PlayerRow): PlayerRecord {
+  return { nameKey: row.name_key, displayName: row.display_name, totalPoints: row.total_points };
+}
+
+async function createSession(playerKey: string): Promise<string> {
+  const db = await getDb();
+  const token = randomUUID();
+  await db.execute({
+    sql: "INSERT INTO player_sessions (token, player_key, created_at) VALUES (?, ?, ?)",
+    args: [token, playerKey, Date.now()],
+  });
+  return token;
+}
+
+export async function registerPlayer(
+  rawName: string,
+  password: string
+): Promise<{ player: PlayerRecord; token: string }> {
+  const nameKey = normalizeName(rawName);
+  const displayName = rawName.trim();
+  if (!nameKey || nameKey.length > 30) {
+    throw new AuthError("Name must be 1-30 characters.", 400);
+  }
+  if (!password || password.length < 4) {
+    throw new AuthError("Password must be at least 4 characters.", 400);
+  }
+
+  const db = await getDb();
+  const existing = await db.execute({
+    sql: "SELECT name_key FROM players WHERE name_key = ?",
+    args: [nameKey],
+  });
+  if (existing.rows.length > 0) {
+    throw new AuthError("That name is already taken. Choose a different one.", 409);
+  }
+
+  const passwordHash = await hashPassword(password);
+  const now = Date.now();
+  await db.execute({
+    sql: `INSERT INTO players (name_key, display_name, password_hash, total_points, points_updated_at, created_at)
+          VALUES (?, ?, ?, 0, ?, ?)`,
+    args: [nameKey, displayName, passwordHash, now, now],
+  });
+
+  const token = await createSession(nameKey);
+  return { player: { nameKey, displayName, totalPoints: 0 }, token };
+}
+
+export async function loginPlayer(
+  rawName: string,
+  password: string
+): Promise<{ player: PlayerRecord; token: string }> {
+  const nameKey = normalizeName(rawName);
+  const db = await getDb();
+  const result = await db.execute({
+    sql: "SELECT * FROM players WHERE name_key = ?",
+    args: [nameKey],
+  });
+  const row = result.rows[0] as unknown as PlayerRow | undefined;
+  if (!row) {
+    throw new AuthError("No account with that name. Check your spelling or register.", 404);
+  }
+  const ok = await verifyPassword(password, row.password_hash);
+  if (!ok) {
+    throw new AuthError("Wrong password.", 401);
+  }
+  const token = await createSession(nameKey);
+  return { player: toRecord(row), token };
+}
+
+/**
+ * Resolves a bearer session token to the player it belongs to. Every
+ * points-awarding route must go through this rather than trusting a
+ * client-supplied player name/key directly — otherwise anyone could spoof
+ * another player's identity in a request body.
+ */
+export async function getPlayerFromToken(token: string | null): Promise<PlayerRecord> {
+  if (!token) throw new AuthError("Not logged in.", 401);
+  const db = await getDb();
+  const result = await db.execute({
+    sql: `SELECT p.* FROM player_sessions s
+          JOIN players p ON p.name_key = s.player_key
+          WHERE s.token = ?`,
+    args: [token],
+  });
+  const row = result.rows[0] as unknown as PlayerRow | undefined;
+  if (!row) throw new AuthError("Session expired. Log in again.", 401);
+  return toRecord(row);
+}
+
+export function bearerToken(req: Request): string | null {
+  const header = req.headers.get("authorization");
+  if (!header?.startsWith("Bearer ")) return null;
+  return header.slice("Bearer ".length).trim() || null;
+}

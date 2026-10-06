@@ -1,7 +1,12 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 
 export default function SiteHeader() {
+  const { player, ready, logout } = useAuth();
+
   return (
     <header className="sticky top-0 z-40 border-b border-border/80 bg-bg/85 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-5 py-3">
@@ -29,6 +34,25 @@ export default function SiteHeader() {
           >
             Games
           </Link>
+          <Link
+            href="/leaderboard"
+            className="rounded-md px-3 py-2 text-text-muted transition hover:bg-surface hover:text-text"
+          >
+            Leaderboard
+          </Link>
+          {ready && player && (
+            <>
+              <span className="ml-2 hidden text-text-muted sm:inline">
+                {player.displayName} &middot; <span className="text-purple-light">{player.totalPoints}</span> pts
+              </span>
+              <button
+                onClick={logout}
+                className="rounded-md px-3 py-2 text-text-muted transition hover:bg-surface hover:text-text"
+              >
+                Log out
+              </button>
+            </>
+          )}
         </nav>
       </div>
     </header>
