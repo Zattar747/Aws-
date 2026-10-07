@@ -41,6 +41,7 @@ export default function TriviaPage() {
   const [liveRemainingMs, setLiveRemainingMs] = useState(0);
   const [durationMs, setDurationMs] = useState(10000);
   const [finalScore, setFinalScore] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
   const questionStartRef = useRef(0);
   const submittedRef = useRef(false);
@@ -95,6 +96,7 @@ export default function TriviaPage() {
   async function submitAnswer(choiceIndex: number | null) {
     if (!question || !sessionId || !token || submittedRef.current) return;
     submittedRef.current = true;
+    setSubmitting(true);
     setSelectedChoice(choiceIndex);
     try {
       const res = await fetch("/api/trivia/answer", {
@@ -105,15 +107,18 @@ export default function TriviaPage() {
       const data: AnswerResult & { error?: string } = await res.json();
       if (!res.ok) {
         submittedRef.current = false;
+        setSubmitting(false);
         setSelectedChoice(null);
         return;
       }
       setResult(data);
       setFinalScore(data.totalScore);
       setPhase("reveal");
+      setSubmitting(false);
       if (data.done) refreshPlayer();
     } catch {
       submittedRef.current = false;
+      setSubmitting(false);
       setSelectedChoice(null);
     }
   }
@@ -121,6 +126,7 @@ export default function TriviaPage() {
   async function giveUp() {
     if (!sessionId || !token) return;
     submittedRef.current = true;
+    setSubmitting(true);
     try {
       const res = await fetch("/api/trivia/give-up", {
         method: "POST",
@@ -129,6 +135,7 @@ export default function TriviaPage() {
       });
       if (!res.ok) {
         submittedRef.current = false;
+        setSubmitting(false);
         return;
       }
       setFinalScore(0);
@@ -136,6 +143,7 @@ export default function TriviaPage() {
       refreshPlayer();
     } catch {
       submittedRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -207,17 +215,25 @@ export default function TriviaPage() {
                 if (i === result.correctIndex) variant = "border-purple bg-purple/10";
                 else if (i === selectedChoice) variant = "border-orange bg-orange/10";
                 else variant = "border-border bg-surface opacity-60";
+              } else if (phase === "question" && submitting) {
+                variant =
+                  i === selectedChoice
+                    ? "border-purple-light bg-purple/20"
+                    : "border-border bg-surface opacity-40";
               }
               return (
                 <button
                   key={i}
                   onClick={() => phase === "question" && submitAnswer(i)}
-                  disabled={phase !== "question"}
-                  className={`rounded-lg border-2 px-4 py-3 text-left text-sm transition-colors ${variant}`}
+                  disabled={phase !== "question" || submitting}
+                  className={`rounded-lg border-2 px-4 py-3 text-left text-sm transition-colors disabled:cursor-not-allowed ${variant}`}
                 >
                   {option}
                   {phase === "reveal" && i === result?.correctIndex && (
                     <span className="ml-2 font-mono text-xs text-purple-light">CORRECT</span>
+                  )}
+                  {phase === "question" && submitting && i === selectedChoice && (
+                    <span className="ml-2 font-mono text-xs text-text-muted">submitting...</span>
                   )}
                 </button>
               );
@@ -226,7 +242,7 @@ export default function TriviaPage() {
 
           {phase === "question" && (
             <div className="mt-4">
-              <GiveUpControl onConfirm={giveUp} />
+              <GiveUpControl onConfirm={giveUp} disabled={submitting} />
             </div>
           )}
 

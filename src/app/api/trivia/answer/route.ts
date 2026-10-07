@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { completeGamePlay } from "@/lib/game-plays";
+import { completeGamePlayUnchecked } from "@/lib/game-plays";
 import { getQuestionForDisplay, isValidOptionOrder } from "@/lib/trivia-session";
 import { triviaQuestionPoints } from "@/lib/points";
 import { QUESTION_DURATION_MS } from "@/lib/trivia-questions";
@@ -65,7 +65,14 @@ export async function POST(req: NextRequest) {
       if (updateResult.rowsAffected === 0) {
         return NextResponse.json({ error: "This question is no longer active." }, { status: 400 });
       }
-      const totalPoints = await completeGamePlay(player.nameKey, "trivia", newScore);
+      // The guarded UPDATE above already proved we're the sole owner of this
+      // completion (only one concurrent request can win current_index =
+      // questionIndex on an 'in_progress' session) — trivia/answer is the
+      // only caller that ever completes the trivia game_plays row, so
+      // there's no other path that could race this specific completion.
+      // completeGamePlay's own guard-then-check round trip would just be
+      // re-confirming that, so skip straight to the unchecked batch.
+      const totalPoints = await completeGamePlayUnchecked(player.nameKey, "trivia", newScore);
       return NextResponse.json({
         correct,
         correctIndex: display.correctDisplayIndex,

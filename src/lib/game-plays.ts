@@ -103,6 +103,41 @@ export async function completeGamePlay(
 }
 
 /**
+ * Same end state as completeGamePlay, but for a caller that has already
+ * proven it's the sole owner of this completion through its own guarded
+ * write (e.g. trivia's guarded UPDATE on trivia_sessions, keyed to the
+ * exact question index) — so completeGamePlay's own guard-then-check round
+ * trip would just be re-confirming something already established. Folds
+ * the whole finish into one batch instead of two sequential round trips.
+ * Only safe to use when no other code path can reach this (player, game)
+ * completion independently — if that's not true, use completeGamePlay.
+ */
+export async function completeGamePlayUnchecked(
+  playerKey: string,
+  game: GameName,
+  pointsEarned: number
+): Promise<number> {
+  const db = await getDb();
+  const now = Date.now();
+  const results = await db.batch([
+    {
+      sql: `INSERT INTO game_plays (player_key, game, status, points_earned, completed_at)
+            VALUES (?, ?, 'completed', ?, ?)
+            ON CONFLICT(player_key, game) DO UPDATE SET
+              status = 'completed', points_earned = excluded.points_earned, completed_at = excluded.completed_at
+            WHERE game_plays.status != 'completed'`,
+      args: [playerKey, game, pointsEarned, now],
+    },
+    {
+      sql: "UPDATE players SET total_points = total_points + ?, points_updated_at = ? WHERE name_key = ?",
+      args: [pointsEarned, now, playerKey],
+    },
+    { sql: "SELECT total_points FROM players WHERE name_key = ?", args: [playerKey] },
+  ]);
+  return (results[2].rows[0] as unknown as { total_points: number }).total_points;
+}
+
+/**
  * Pictionary spans multiple rounds, so unlike the other games it can't be
  * "completed" after one play — points accrue across every round a player
  * participates in (as drawer or guesser), staying in_progress, until the
