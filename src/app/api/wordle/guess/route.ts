@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { ALLOWED_GUESSES } from "@/lib/words";
 import { scoreGuess } from "@/lib/wordle-logic";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { completeGamePlay } from "@/lib/game-plays";
+import { completeGamePlayUnchecked } from "@/lib/game-plays";
 import { wordlePoints } from "@/lib/points";
 
 export const runtime = "nodejs";
@@ -68,7 +68,12 @@ export async function POST(req: NextRequest) {
     let totalPoints: number | undefined;
     if (status !== "in_progress") {
       pointsAwarded = wordlePoints(won, guesses.length);
-      totalPoints = await completeGamePlay(player.nameKey, "wordle", pointsAwarded);
+      // The guarded UPDATE above already proved exclusive ownership of this
+      // completion (wordle/guess and wordle/give-up are the only two
+      // callers, and they share this same wordle_games guard, so whichever
+      // wins it is the sole legitimate completer) — skip completeGamePlay's
+      // own redundant guard-check round trip.
+      totalPoints = await completeGamePlayUnchecked(player.nameKey, "wordle", pointsAwarded);
     }
 
     return NextResponse.json({

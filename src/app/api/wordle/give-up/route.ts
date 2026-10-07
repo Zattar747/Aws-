@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { completeGamePlay } from "@/lib/game-plays";
+import { completeGamePlayUnchecked } from "@/lib/game-plays";
 
 export const runtime = "nodejs";
 
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This game has already ended." }, { status: 400 });
     }
 
-    const totalPoints = await completeGamePlay(player.nameKey, "wordle", 0);
+    const totalPoints = await completeGamePlayUnchecked(player.nameKey, "wordle", 0);
 
     return NextResponse.json({
       status: "lost",
