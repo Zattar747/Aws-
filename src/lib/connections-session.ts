@@ -1,6 +1,6 @@
 import { getDb } from "./db";
 import { completeGamePlay } from "./game-plays";
-import { CONNECTIONS_DURATION_MS, type GridCell } from "./connections-logic";
+import { type GridCell } from "./connections-logic";
 
 export interface ConnectionsSessionRow {
   id: string;
@@ -10,10 +10,6 @@ export interface ConnectionsSessionRow {
   score: number;
   started_at: number;
   status: string;
-}
-
-export function isExpired(session: ConnectionsSessionRow, now = Date.now()): boolean {
-  return now - session.started_at > CONNECTIONS_DURATION_MS;
 }
 
 export async function loadSession(sessionId: string, playerKey: string): Promise<ConnectionsSessionRow | null> {
@@ -28,8 +24,8 @@ export async function loadSession(sessionId: string, playerKey: string): Promise
 /**
  * Marks the session done and locks in its score as the final game_plays
  * result. Guarded so finalizing an already-finalized session (e.g. a client
- * retry, or /connect and the timeout racing each other) is a harmless no-op
- * rather than a double award — completeGamePlay has its own guard on top.
+ * retry racing a solved-all-groups response) is a harmless no-op rather
+ * than a double award — completeGamePlay has its own guard on top.
  */
 export async function finalizeSession(
   playerKey: string,
@@ -41,6 +37,17 @@ export async function finalizeSession(
     args: [session.id],
   });
   return completeGamePlay(playerKey, "connections", session.score);
+}
+
+/** Giving up forfeits the whole game, including any groups already solved
+ * — always 0 points, not whatever partial score had accrued. */
+export async function giveUpSession(playerKey: string, session: ConnectionsSessionRow): Promise<number> {
+  const db = await getDb();
+  await db.execute({
+    sql: "UPDATE connections_sessions SET status = 'done' WHERE id = ? AND status = 'in_progress'",
+    args: [session.id],
+  });
+  return completeGamePlay(playerKey, "connections", 0);
 }
 
 export function parseGrid(gridJson: string): GridCell[] {

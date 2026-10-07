@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { fetchJsonWithRetry } from "@/lib/fetch-retry";
 import { GROUP_SIZE, GRID_COLS, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import LoginGate from "@/components/LoginGate";
+import GiveUpControl from "@/components/GiveUpControl";
 
 type Phase = "loading" | "blocked" | "playing" | "done";
 
@@ -22,14 +23,11 @@ interface NewResponse {
   solvedPositions: number[];
   score: number;
   totalCategories: number;
-  startedAt: number;
-  durationMs: number;
 }
 
 interface ConnectResponse {
   error?: string;
   correct: boolean;
-  expired?: boolean;
   awayCount?: number;
   positions?: number[];
   pointsEarned?: number;
@@ -41,7 +39,7 @@ interface ConnectResponse {
   grid?: GridCell[];
 }
 
-interface FinishResponse {
+interface GiveUpResponse {
   totalScore: number;
   totalCategories: number;
   totalPoints?: number;
@@ -60,43 +58,10 @@ export default function ConnectionsPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [score, setScore] = useState(0);
   const [solvedCount, setSolvedCount] = useState(0);
-  const [liveRemainingMs, setLiveRemainingMs] = useState(0);
-  const [durationMs, setDurationMs] = useState(90000);
   const [finalGrid, setFinalGrid] = useState<GridCell[] | null>(null);
   const [finalScore, setFinalScore] = useState(0);
+  const [gaveUp, setGaveUp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
-  const startedAtRef = useRef(0);
-  const finishingRef = useRef(false);
-
-  const finishGame = useCallback(
-    async (preloadedGrid?: GridCell[], preloadedTotalPoints?: number, preloadedScore?: number) => {
-      if (finishingRef.current) return;
-      finishingRef.current = true;
-      if (preloadedGrid) {
-        setFinalGrid(preloadedGrid);
-        setFinalScore(preloadedScore ?? score);
-        setPhase("done");
-        refreshPlayer();
-        return;
-      }
-      if (!sessionId || !token) return;
-      try {
-        const { data } = await fetchJsonWithRetry<FinishResponse>("/api/connections/finish", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ sessionId }),
-        });
-        setFinalGrid(data.grid);
-        setFinalScore(data.totalScore);
-        setPhase("done");
-        refreshPlayer();
-      } catch {
-        finishingRef.current = false;
-      }
-    },
-    [sessionId, token, score, refreshPlayer]
-  );
 
   useEffect(() => {
     if (!token) return;
@@ -116,9 +81,6 @@ export default function ConnectionsPage() {
         setSolvedPositions(new Set(data.solvedPositions));
         setScore(data.score);
         setSolvedCount(data.solvedCategories.length);
-        setDurationMs(data.durationMs);
-        startedAtRef.current = data.startedAt;
-        setLiveRemainingMs(Math.max(0, data.durationMs - (Date.now() - data.startedAt)));
         setPhase("playing");
       } catch {
         setBlockedMessage("Network error. Please try again.");
@@ -126,18 +88,6 @@ export default function ConnectionsPage() {
       }
     })();
   }, [token]);
-
-  useEffect(() => {
-    if (phase !== "playing") return;
-    const id = window.setInterval(() => {
-      const remaining = Math.max(0, durationMs - (Date.now() - startedAtRef.current));
-      setLiveRemainingMs(remaining);
-      if (remaining <= 0) {
-        finishGame();
-      }
-    }, 150);
-    return () => window.clearInterval(id);
-  }, [phase, durationMs, finishGame]);
 
   function toggleCell(pos: number) {
     if (phase !== "playing" || solvedPositions.has(pos) || submitting) return;
@@ -164,11 +114,6 @@ export default function ConnectionsPage() {
         return;
       }
 
-      if (data.expired) {
-        finishGame();
-        return;
-      }
-
       if (data.correct && data.positions) {
         setSolvedPositions((prev) => new Set([...prev, ...data.positions!]));
         setScore(data.totalScore);
@@ -176,14 +121,15 @@ export default function ConnectionsPage() {
         setSelected([]);
         setFeedback(null);
         setSubmitting(false);
-        if (data.allSolved) {
-          finishGame(data.grid, data.totalPoints, data.totalScore);
+        if (data.allSolved && data.grid) {
+          setFinalGrid(data.grid);
+          setFinalScore(data.totalScore);
+          setPhase("done");
+          refreshPlayer();
         }
       } else {
         setWrongFlash(selected);
-        setFeedback(
-          data.awayCount ? `${data.awayCount} away from a group!` : "Not a match."
-        );
+        setFeedback(data.awayCount ? `${data.awayCount} away from a group!` : "Not a match.");
         window.setTimeout(() => {
           setWrongFlash([]);
           setSelected([]);
@@ -193,6 +139,26 @@ export default function ConnectionsPage() {
       }
     } catch {
       setSubmitting(false);
+    }
+  }
+
+  async function giveUp() {
+    if (!sessionId || !token) return;
+    try {
+      const res = await fetch("/api/connections/give-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ sessionId }),
+      });
+      const data: GiveUpResponse = await res.json();
+      if (!res.ok) return;
+      setFinalGrid(data.grid);
+      setFinalScore(0);
+      setGaveUp(true);
+      setPhase("done");
+      refreshPlayer();
+    } catch {
+      // leave them on the board — they can try the button again
     }
   }
 
@@ -224,17 +190,8 @@ export default function ConnectionsPage() {
 
       {phase === "playing" && (
         <>
-          <div className="mb-3 flex w-full items-center justify-between font-mono text-xs text-text-muted">
-            <span>
-              {solvedCount} / {TOTAL_CATEGORIES} groups &middot; {score} pts
-            </span>
-            <span>{Math.ceil(liveRemainingMs / 1000)}s</span>
-          </div>
-          <div className="mb-4 h-2 w-full overflow-hidden rounded bg-surface-2">
-            <div
-              className="h-full bg-orange transition-all"
-              style={{ width: `${(liveRemainingMs / durationMs) * 100}%` }}
-            />
+          <div className="mb-4 font-mono text-xs text-text-muted">
+            {solvedCount} / {TOTAL_CATEGORIES} groups &middot; {score} pts
           </div>
 
           <div
@@ -284,13 +241,17 @@ export default function ConnectionsPage() {
               </button>
             </div>
           </div>
+
+          <div className="mt-4 w-full">
+            <GiveUpControl onConfirm={giveUp} disabled={submitting} />
+          </div>
         </>
       )}
 
       {phase === "done" && (
         <div className="flex w-full flex-col items-center gap-4 rounded-xl border border-border bg-surface p-6 text-center">
           <p className="font-mono text-lg font-bold">
-            {solvedCount === TOTAL_CATEGORIES ? "All groups found!" : "Time's up!"}
+            {gaveUp ? "Gave up" : "All groups found!"}
           </p>
           <p className="font-mono text-sm text-orange">{finalScore} points earned</p>
           {finalGrid && (

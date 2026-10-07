@@ -4,7 +4,6 @@ import { CONNECTIONS_CATEGORIES } from "./connections-words";
 export const GRID_ROWS = 4;
 export const GRID_COLS = 8;
 export const TOTAL_CATEGORIES = CONNECTIONS_CATEGORIES.length; // 8
-export const CONNECTIONS_DURATION_MS = 90_000;
 export const GROUP_SIZE = 4;
 
 export interface GridCell {

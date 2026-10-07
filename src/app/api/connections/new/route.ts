@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
 import { assertCanStartGame } from "@/lib/game-plays";
-import { buildGrid, CONNECTIONS_DURATION_MS, GRID_ROWS, GRID_COLS } from "@/lib/connections-logic";
-import { finalizeSession, isExpired, parseGrid, type ConnectionsSessionRow } from "@/lib/connections-session";
+import { buildGrid, GRID_ROWS, GRID_COLS } from "@/lib/connections-logic";
+import { parseGrid, type ConnectionsSessionRow } from "@/lib/connections-session";
 
 export const runtime = "nodejs";
 
@@ -21,10 +21,6 @@ export async function POST(req: NextRequest) {
     const existingRow = extraResults[0].rows[0] as unknown as ConnectionsSessionRow | undefined;
 
     if (existingRow) {
-      if (isExpired(existingRow)) {
-        await finalizeSession(player.nameKey, existingRow);
-        throw new AuthError("Time's up on your last attempt — this game is already finished.", 403);
-      }
       const grid = parseGrid(existingRow.grid_json);
       const solved: string[] = JSON.parse(existingRow.solved_json);
       const solvedPositions = grid.reduce<number[]>((acc, cell, i) => {
@@ -40,8 +36,6 @@ export async function POST(req: NextRequest) {
         solvedPositions,
         score: existingRow.score,
         totalCategories: 8,
-        startedAt: existingRow.started_at,
-        durationMs: CONNECTIONS_DURATION_MS,
       });
     }
 
@@ -74,8 +68,6 @@ export async function POST(req: NextRequest) {
       solvedPositions: [],
       score: 0,
       totalCategories: 8,
-      startedAt: now,
-      durationMs: CONNECTIONS_DURATION_MS,
     });
   } catch (err) {
     if (err instanceof AuthError) {

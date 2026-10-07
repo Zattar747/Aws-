@@ -6,6 +6,7 @@ import type { LetterState } from "@/lib/wordle-logic";
 import { useAuth } from "@/lib/auth-context";
 import { fetchJsonWithRetry } from "@/lib/fetch-retry";
 import LoginGate from "@/components/LoginGate";
+import GiveUpControl from "@/components/GiveUpControl";
 
 const WORD_LENGTH = 5;
 const MAX_GUESSES = 6;
@@ -173,6 +174,30 @@ export default function WordlePage() {
     }
   }, [currentGuess, gameId, loading, flashMessage, guesses.length, token, refreshPlayer]);
 
+  const giveUp = useCallback(async () => {
+    if (!gameId || !token || loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/wordle/give-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ gameId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+      setEndInfo({
+        status: "lost",
+        answer: data.answer,
+        guessesUsed: data.guessesUsed,
+        pointsAwarded: 0,
+      });
+      setPhase("ended");
+      refreshPlayer();
+    } finally {
+      setLoading(false);
+    }
+  }, [gameId, token, loading, refreshPlayer]);
+
   useEffect(() => {
     if (phase !== "playing") return;
 
@@ -285,6 +310,9 @@ export default function WordlePage() {
                   })}
                 </div>
               ))}
+              <div className="mt-2 flex justify-center">
+                <GiveUpControl onConfirm={giveUp} disabled={loading} />
+              </div>
             </div>
           )}
 

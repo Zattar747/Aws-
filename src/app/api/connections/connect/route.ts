@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
 import { GROUP_SIZE, isValidPosition, maxCategoryOverlap, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import { CONNECTIONS_POINTS_PER_CATEGORY } from "@/lib/points";
-import { finalizeSession, isExpired, loadSession, parseGrid } from "@/lib/connections-session";
+import { finalizeSession, loadSession, parseGrid } from "@/lib/connections-session";
 
 export const runtime = "nodejs";
 
@@ -20,17 +20,6 @@ export async function POST(req: NextRequest) {
     }
     if (session.status !== "in_progress") {
       return NextResponse.json({ error: "This game is already finished." }, { status: 400 });
-    }
-    if (isExpired(session)) {
-      const totalPoints = await finalizeSession(player.nameKey, session);
-      return NextResponse.json({
-        correct: false,
-        expired: true,
-        totalScore: session.score,
-        solvedCount: JSON.parse(session.solved_json).length,
-        totalCategories: TOTAL_CATEGORIES,
-        totalPoints,
-      });
     }
 
     if (

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { fetchJsonWithRetry } from "@/lib/fetch-retry";
 import LoginGate from "@/components/LoginGate";
+import GiveUpControl from "@/components/GiveUpControl";
 
 type Phase = "loading" | "blocked" | "question" | "reveal" | "done";
 
@@ -117,6 +118,27 @@ export default function TriviaPage() {
     }
   }
 
+  async function giveUp() {
+    if (!sessionId || !token) return;
+    submittedRef.current = true;
+    try {
+      const res = await fetch("/api/trivia/give-up", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ sessionId }),
+      });
+      if (!res.ok) {
+        submittedRef.current = false;
+        return;
+      }
+      setFinalScore(0);
+      setPhase("done");
+      refreshPlayer();
+    } catch {
+      submittedRef.current = false;
+    }
+  }
+
   function nextOrFinish() {
     if (!result) return;
     if (result.done || !result.nextQuestion) {
@@ -201,6 +223,12 @@ export default function TriviaPage() {
               );
             })}
           </div>
+
+          {phase === "question" && (
+            <div className="mt-4">
+              <GiveUpControl onConfirm={giveUp} />
+            </div>
+          )}
 
           {phase === "reveal" && result && (
             <div className="mt-5 flex w-full flex-col items-center gap-3 rounded-xl border border-border bg-surface p-4 text-center">
