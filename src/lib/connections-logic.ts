@@ -6,7 +6,7 @@ export const CATEGORIES_PER_GAME = 4;
 export const TOTAL_CATEGORIES = CATEGORIES_PER_GAME;
 export const GRID_COLS = 4;
 export const GRID_ROWS = (CATEGORIES_PER_GAME * GROUP_SIZE) / GRID_COLS;
-export const MAX_MISTAKES = 8;
+export const MAX_MISTAKES = 4;
 
 export interface GridCell {
   word: string;
