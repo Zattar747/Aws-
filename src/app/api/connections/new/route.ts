@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
 import { assertCanStartGame } from "@/lib/game-plays";
-import { buildGrid, GRID_ROWS, GRID_COLS, MAX_MISTAKES } from "@/lib/connections-logic";
+import { buildGrid, GRID_ROWS, GRID_COLS, MAX_MISTAKES, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import { parseGrid, type ConnectionsSessionRow } from "@/lib/connections-session";
 
 export const runtime = "nodejs";
@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
         solvedPositions,
         solvedGroups,
         score: existingRow.score,
-        totalCategories: 8,
+        totalCategories: TOTAL_CATEGORIES,
         mistakesRemaining: Math.max(0, MAX_MISTAKES - existingRow.mistakes),
       });
     }
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
       solvedPositions: [],
       solvedGroups: [],
       score: 0,
-      totalCategories: 8,
+      totalCategories: TOTAL_CATEGORIES,
       mistakesRemaining: MAX_MISTAKES,
     });
   } catch (err) {
