@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
 import { assertCanStartGame } from "@/lib/game-plays";
-import { buildGrid, GRID_ROWS, GRID_COLS } from "@/lib/connections-logic";
+import { buildGrid, GRID_ROWS, GRID_COLS, MAX_MISTAKES } from "@/lib/connections-logic";
 import { parseGrid, type ConnectionsSessionRow } from "@/lib/connections-session";
 
 export const runtime = "nodejs";
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
         solvedPositions,
         score: existingRow.score,
         totalCategories: 8,
+        mistakesRemaining: Math.max(0, MAX_MISTAKES - existingRow.mistakes),
       });
     }
 
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
       solvedPositions: [],
       score: 0,
       totalCategories: 8,
+      mistakesRemaining: MAX_MISTAKES,
     });
   } catch (err) {
     if (err instanceof AuthError) {

@@ -90,6 +90,7 @@ const SCHEMA = `
     grid_json TEXT NOT NULL,
     solved_json TEXT NOT NULL DEFAULT '[]',
     score INTEGER NOT NULL DEFAULT 0,
+    mistakes INTEGER NOT NULL DEFAULT 0,
     started_at INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'in_progress'
   );
@@ -220,6 +221,16 @@ async function ensureSchema(): Promise<void> {
     `INSERT INTO game_locks (game, locked, updated_at) VALUES ('pictionary', 1, ${Date.now()})
      ON CONFLICT(game) DO NOTHING`
   );
+  // CREATE TABLE IF NOT EXISTS above is a no-op on a table that already
+  // exists, so a column added after the table was first created (like this
+  // one) needs its own idempotent migration — SQLite has no "ADD COLUMN IF
+  // NOT EXISTS", so the duplicate-column error on repeat runs is expected
+  // and ignored.
+  try {
+    await client.execute("ALTER TABLE connections_sessions ADD COLUMN mistakes INTEGER NOT NULL DEFAULT 0");
+  } catch (err) {
+    if (!(err instanceof LibsqlError && /duplicate column/i.test(err.message))) throw err;
+  }
 }
 
 let schemaReady: Promise<void> | undefined = global.__awsArcadeSchemaReady;

@@ -8,6 +8,7 @@ export interface ConnectionsSessionRow {
   grid_json: string;
   solved_json: string;
   score: number;
+  mistakes: number;
   started_at: number;
   status: string;
 }

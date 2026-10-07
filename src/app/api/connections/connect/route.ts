@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getPlayerFromToken, bearerToken, AuthError } from "@/lib/players";
-import { GROUP_SIZE, isValidPosition, maxCategoryOverlap, TOTAL_CATEGORIES } from "@/lib/connections-logic";
+import { GROUP_SIZE, isValidPosition, MAX_MISTAKES, maxCategoryOverlap, TOTAL_CATEGORIES } from "@/lib/connections-logic";
 import { CONNECTIONS_POINTS_PER_CATEGORY } from "@/lib/points";
 import { finalizeSession, loadSession, parseGrid } from "@/lib/connections-session";
 
@@ -42,12 +42,34 @@ export async function POST(req: NextRequest) {
     const { category, count } = maxCategoryOverlap(categories);
 
     if (count !== GROUP_SIZE) {
+      const db = await getDb();
+      const newMistakes = session.mistakes + 1;
+      const updateResult = await db.execute({
+        sql: `UPDATE connections_sessions SET mistakes = ?
+              WHERE id = ? AND status = 'in_progress' AND mistakes = ?`,
+        args: [newMistakes, session.id, session.mistakes],
+      });
+      if (updateResult.rowsAffected === 0) {
+        return NextResponse.json({ error: "Try again." }, { status: 409 });
+      }
+
+      const gameOver = newMistakes >= MAX_MISTAKES;
+      let totalPoints: number | undefined;
+      if (gameOver) {
+        totalPoints = await finalizeSession(player.nameKey, session);
+      }
+
       return NextResponse.json({
         correct: false,
         awayCount: count >= 2 ? GROUP_SIZE - count : undefined,
         totalScore: session.score,
         solvedCount: solved.length,
         totalCategories: TOTAL_CATEGORIES,
+        mistakesUsed: newMistakes,
+        mistakesRemaining: Math.max(0, MAX_MISTAKES - newMistakes),
+        gameOver,
+        totalPoints,
+        grid: gameOver ? grid : undefined,
       });
     }
 
@@ -80,6 +102,7 @@ export async function POST(req: NextRequest) {
       totalCategories: TOTAL_CATEGORIES,
       allSolved,
       totalPoints,
+      mistakesRemaining: Math.max(0, MAX_MISTAKES - session.mistakes),
       grid: allSolved ? grid : undefined,
     });
   } catch (err) {
