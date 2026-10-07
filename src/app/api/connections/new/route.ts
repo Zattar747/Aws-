@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
         if (solved.includes(cell.category)) acc.push(i);
         return acc;
       }, []);
+      const solvedGroups = solved.map((category) => ({
+        category,
+        words: grid.filter((c) => c.category === category).map((c) => c.word),
+      }));
       return NextResponse.json({
         sessionId: existingRow.id,
         rows: GRID_ROWS,
@@ -34,6 +38,7 @@ export async function POST(req: NextRequest) {
         words: grid.map((c) => c.word),
         solvedCategories: solved,
         solvedPositions,
+        solvedGroups,
         score: existingRow.score,
         totalCategories: 8,
         mistakesRemaining: Math.max(0, MAX_MISTAKES - existingRow.mistakes),
@@ -67,6 +72,7 @@ export async function POST(req: NextRequest) {
       words: grid.map((c) => c.word),
       solvedCategories: [],
       solvedPositions: [],
+      solvedGroups: [],
       score: 0,
       totalCategories: 8,
       mistakesRemaining: MAX_MISTAKES,

@@ -12,10 +12,29 @@ import GiveUpControl from "@/components/GiveUpControl";
 type Phase = "loading" | "blocked" | "playing" | "done";
 type EndReason = "solved" | "gaveUp" | "mistakes";
 
+interface SolvedGroup {
+  category: string;
+  words: string[];
+}
+
 interface GridCell {
   word: string;
   category: string;
 }
+
+// One color per category, assigned in the order each group is solved — not
+// meaningful by itself (unlike NYT's difficulty tiers), just enough visual
+// distinction that stacked banners read as separate groups at a glance.
+const CATEGORY_COLORS = [
+  { bg: "#a7c957", text: "#1a2e05" },
+  { bg: "#f4d35e", text: "#3d2e00" },
+  { bg: "#8ecae6", text: "#0b2436" },
+  { bg: "#c77dff", text: "#2c0a4d" },
+  { bg: "#ffb347", text: "#3d1f00" },
+  { bg: "#ef6f6f", text: "#3d0a0a" },
+  { bg: "#4dd0c7", text: "#042e2b" },
+  { bg: "#e091c4", text: "#3d0a2e" },
+];
 
 interface NewResponse {
   error?: string;
@@ -23,6 +42,7 @@ interface NewResponse {
   words: string[];
   solvedCategories: string[];
   solvedPositions: number[];
+  solvedGroups: SolvedGroup[];
   score: number;
   totalCategories: number;
   mistakesRemaining: number;
@@ -32,6 +52,7 @@ interface ConnectResponse {
   error?: string;
   correct: boolean;
   awayCount?: number;
+  category?: string;
   positions?: number[];
   pointsEarned?: number;
   totalScore: number;
@@ -51,6 +72,19 @@ interface GiveUpResponse {
   grid: GridCell[];
 }
 
+function GroupBanner({ group, colorIndex }: { group: SolvedGroup; colorIndex: number }) {
+  const color = CATEGORY_COLORS[colorIndex % CATEGORY_COLORS.length];
+  return (
+    <div
+      className="flex w-full flex-col items-center justify-center gap-1 rounded-md px-4 py-3 text-center"
+      style={{ backgroundColor: color.bg, color: color.text }}
+    >
+      <p className="font-mono text-sm font-bold uppercase tracking-wide">{group.category}</p>
+      <p className="text-xs font-medium uppercase">{group.words.join(", ")}</p>
+    </div>
+  );
+}
+
 export default function ConnectionsPage() {
   const { player, token, ready, refreshPlayer } = useAuth();
   const [phase, setPhase] = useState<Phase>("loading");
@@ -59,11 +93,11 @@ export default function ConnectionsPage() {
   const [words, setWords] = useState<string[]>([]);
   const [displayOrder, setDisplayOrder] = useState<number[]>([]);
   const [solvedPositions, setSolvedPositions] = useState<Set<number>>(new Set());
+  const [solvedGroups, setSolvedGroups] = useState<SolvedGroup[]>([]);
   const [selected, setSelected] = useState<number[]>([]);
   const [wrongFlash, setWrongFlash] = useState<number[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [score, setScore] = useState(0);
-  const [solvedCount, setSolvedCount] = useState(0);
   const [mistakesRemaining, setMistakesRemaining] = useState(MAX_MISTAKES);
   const [finalGrid, setFinalGrid] = useState<GridCell[] | null>(null);
   const [finalScore, setFinalScore] = useState(0);
@@ -87,8 +121,8 @@ export default function ConnectionsPage() {
         setWords(data.words);
         setDisplayOrder(shuffle(data.words.map((_, i) => i)));
         setSolvedPositions(new Set(data.solvedPositions));
+        setSolvedGroups(data.solvedGroups);
         setScore(data.score);
-        setSolvedCount(data.solvedCategories.length);
         setMistakesRemaining(data.mistakesRemaining);
         setPhase("playing");
       } catch {
@@ -123,10 +157,11 @@ export default function ConnectionsPage() {
         return;
       }
 
-      if (data.correct && data.positions) {
+      if (data.correct && data.positions && data.category) {
+        const solvedWords = data.positions.map((p) => words[p]);
         setSolvedPositions((prev) => new Set([...prev, ...data.positions!]));
+        setSolvedGroups((prev) => [...prev, { category: data.category!, words: solvedWords }]);
         setScore(data.totalScore);
-        setSolvedCount(data.solvedCount);
         setMistakesRemaining(data.mistakesRemaining);
         setSelected([]);
         setFeedback(null);
@@ -186,6 +221,7 @@ export default function ConnectionsPage() {
 
   const endMessage =
     endReason === "gaveUp" ? "Gave up" : endReason === "mistakes" ? "Out of guesses" : "All groups found!";
+  const remainingOrder = displayOrder.filter((pos) => !solvedPositions.has(pos));
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center px-4 py-8">
@@ -214,7 +250,7 @@ export default function ConnectionsPage() {
         <>
           <div className="mb-4 flex w-full items-center justify-between font-mono text-xs text-text-muted">
             <span>
-              {solvedCount} / {TOTAL_CATEGORIES} groups &middot; {score} pts
+              {solvedGroups.length} / {TOTAL_CATEGORIES} groups &middot; {score} pts
             </span>
             <span className="flex items-center gap-2">
               Mistakes remaining:
@@ -231,25 +267,31 @@ export default function ConnectionsPage() {
             </span>
           </div>
 
+          {solvedGroups.length > 0 && (
+            <div className="mb-2 flex w-full flex-col gap-1.5">
+              {solvedGroups.map((group, i) => (
+                <GroupBanner key={group.category} group={group} colorIndex={i} />
+              ))}
+            </div>
+          )}
+
           <div
             className="mb-4 grid w-full gap-1.5"
             style={{ gridTemplateColumns: `repeat(${GRID_COLS}, minmax(0, 1fr))` }}
           >
-            {displayOrder.map((pos) => {
+            {remainingOrder.map((pos) => {
               const word = words[pos];
-              const isSolved = solvedPositions.has(pos);
               const isSelected = selected.includes(pos);
               const isWrong = wrongFlash.includes(pos);
               let variant = "border-border bg-surface hover:border-purple";
-              if (isSolved) variant = "border-purple bg-purple/10 text-purple-light";
-              else if (isWrong) variant = "border-orange bg-orange/10";
+              if (isWrong) variant = "border-orange bg-orange/10";
               else if (isSelected) variant = "border-purple-light bg-purple/20";
               return (
                 <button
                   key={pos}
                   onClick={() => toggleCell(pos)}
-                  disabled={isSolved || submitting}
-                  className={`flex min-h-14 items-center justify-center rounded-md border-2 px-1 py-2 text-center text-[10px] leading-tight transition-colors sm:text-xs ${variant}`}
+                  disabled={submitting}
+                  className={`flex min-h-14 items-center justify-center rounded-md border-2 px-1 py-2 text-center text-[10px] font-bold uppercase leading-tight transition-colors sm:text-xs ${variant}`}
                 >
                   {word}
                 </button>
@@ -296,18 +338,17 @@ export default function ConnectionsPage() {
           <p className="font-mono text-lg font-bold">{endMessage}</p>
           <p className="font-mono text-sm text-orange">{finalScore} points earned</p>
           {finalGrid && (
-            <div className="w-full text-left">
-              <p className="mb-2 font-mono text-xs uppercase tracking-widest text-text-muted">The groups</p>
-              <div className="flex flex-col gap-2">
-                {Array.from(new Set(finalGrid.map((c) => c.category))).map((category) => (
-                  <div key={category} className="rounded-lg border border-border bg-surface-2 p-3">
-                    <p className="font-mono text-xs font-semibold text-purple-light">{category}</p>
-                    <p className="text-sm text-text-muted">
-                      {finalGrid.filter((c) => c.category === category).map((c) => c.word).join(", ")}
-                    </p>
-                  </div>
-                ))}
-              </div>
+            <div className="flex w-full flex-col gap-1.5">
+              {Array.from(new Set(finalGrid.map((c) => c.category))).map((category, i) => (
+                <GroupBanner
+                  key={category}
+                  colorIndex={i}
+                  group={{
+                    category,
+                    words: finalGrid.filter((c) => c.category === category).map((c) => c.word),
+                  }}
+                />
+              ))}
             </div>
           )}
           <Link

@@ -1,8 +1,8 @@
 import { shuffle } from "./shuffle";
 import { CONNECTIONS_CATEGORIES } from "./connections-words";
 
-export const GRID_ROWS = 4;
-export const GRID_COLS = 8;
+export const GRID_ROWS = 8;
+export const GRID_COLS = 4;
 export const TOTAL_CATEGORIES = CONNECTIONS_CATEGORIES.length; // 8
 export const GROUP_SIZE = 4;
 export const MAX_MISTAKES = 6;
